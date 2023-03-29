@@ -1,25 +1,25 @@
-use std::{path::Path, ops::Deref, ffi::OsStr, fs::{self, OpenOptions, File}, time::Duration, os, thread};
+use std::{path::Path, ops::Deref, ffi::OsStr, fs::{OpenOptions}, time::Duration, sync::{Arc, Mutex}};
 
 use log::*;
-use souvlaki::{MediaControls, MediaPlayback, MediaMetadata};
+use souvlaki::{MediaPlayback, MediaMetadata};
 use notify::{Watcher, RecursiveMode, Result, event::*, RecommendedWatcher};
 
-use crate::config::Config;
+use crate::{config::Config, media_controls::Controls};
 
 const METADATA_FILE: &str = "metadata";
 const PLAYBACK_FILE: &str = "playback";
 
-pub fn watch_filesystem(mut controls: MediaControls, config: Config) -> RecommendedWatcher {
+pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Config) -> RecommendedWatcher {
     let communication_directory = config.communication_directory.clone();
 
     create_file_structure(&config);
 
     // get initial info
-    update(&mut controls, &config);
+    update(controls.clone(), &config);
 
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
-        handle_event(event, &mut controls, &config)
+        handle_event(event, controls.clone(), &config)
     }).unwrap();
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)
         .unwrap();
@@ -38,7 +38,7 @@ fn create_file_structure(config: &Config) {
         .open(config.get_comm_path(PLAYBACK_FILE)).unwrap();
 }
 
-fn handle_event(event: Result<Event>, controls: &mut MediaControls, config: &Config) {
+fn handle_event(event: Result<Event>, mut controls: Arc<Mutex<Controls>>, config: &Config) {
     let Ok(event) = event else { return };
 
     if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
@@ -49,8 +49,8 @@ fn handle_event(event: Result<Event>, controls: &mut MediaControls, config: &Con
 
         for file_name in file_names {
             match file_name {
-                METADATA_FILE => update_metadata(controls, config),
-                PLAYBACK_FILE => update_playback(controls, config),
+                METADATA_FILE => update_metadata(&mut controls, config),
+                PLAYBACK_FILE => update_playback(&mut controls, config),
                 // TODO: plugin availablity watcher
                 _ => {},
             }
@@ -58,17 +58,20 @@ fn handle_event(event: Result<Event>, controls: &mut MediaControls, config: &Con
     }
 }
 
-fn update(controls: &mut MediaControls, config: &Config) {
-    update_metadata(controls, config);
-    update_playback(controls, config);
+pub fn update(mut controls: Arc<Mutex<Controls>>, config: &Config) {
+    update_metadata(&mut controls, config);
+    update_playback(&mut controls, config);
 }
 
-fn update_playback(controls: &mut MediaControls, config: &Config) {
+fn update_playback(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
     let playback = get_playback(config);
 
     // TODO: don't panic when playback not found
     if let Some(playback) = playback {
-        controls.set_playback(playback)
+        info!("updating playback");
+
+        controls.lock().unwrap()
+            .set_playback(playback)
             .unwrap();
     }
 }
@@ -90,7 +93,7 @@ fn get_playback(config: &Config) -> Option<MediaPlayback> {
     }
 }
 
-fn update_metadata(controls: &mut MediaControls, config: &Config) {
+fn update_metadata(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
     let metadata = config.read_comm_file(METADATA_FILE)
         .unwrap();
 
@@ -101,15 +104,18 @@ fn update_metadata(controls: &mut MediaControls, config: &Config) {
     let lines: Vec<_> = metadata.lines().collect();
 
     if let [ title, album, artist, cover_url, duration ] = lines[..] {
+        info!("updating metadata");
+
         let duration = Duration::from_millis(duration.parse().unwrap());
 
-        controls.set_metadata(MediaMetadata {
-            title: Some(title),
-            album: Some(album),
-            artist: Some(artist),
-            cover_url: map_cover(cover_url, config, artist, title).as_deref(),
-            duration: Some(duration),
-        })
+        controls.lock().unwrap()
+            .set_metadata(MediaMetadata {
+                title: Some(title),
+                album: Some(album),
+                artist: Some(artist),
+                cover_url: map_cover(cover_url, config, artist, title).as_deref(),
+                duration: Some(duration),
+            })
             .unwrap();
     } else {
         warn!("Got malformed metadata from file, found:\n{metadata}")

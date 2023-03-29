@@ -9,10 +9,10 @@ mod filesystem;
 mod config;
 mod logger;
 
-use std::env;
-
-use config::{Mapping, Config};
+// cargo is too dumb to realize that it's being used out of debug
+#[allow(unused_imports)]
 use daemonize::Daemonize;
+use media_controls::Controls;
 
 fn main() {
     // detatch (doesn't detatch in debug for debugging)
@@ -28,12 +28,12 @@ fn main() {
     // initialize gtk
     gtk::init().unwrap();
 
-    // start system tray
-    tray::create(config.clone());
-
     // attach to media controls
-    let media_controls = media_controls::create(config.clone());
-    let _watcher = filesystem::watch_filesystem(media_controls, config);
+    let controls = Controls::init(config.clone());
+    let _watcher = filesystem::watch_filesystem(controls.clone(), config.clone());
+
+    // start system tray
+    tray::create(controls, config);
 
     // start gtk event loop
     gtk::main();

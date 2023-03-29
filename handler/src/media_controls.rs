@@ -1,31 +1,61 @@
 use std::{process::Command, sync::{Arc, Mutex}};
 
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig};
+use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error};
 
 use crate::config::Config;
 
-// spoilers
-// pub type Controls = Arc<Mutex<Option<MediaControls>>>;
+pub struct Controls {
+    controls: MediaControls,
+    config: Config,
+}
 
-// pub fn initialize() -> Controls {
-//     Arc::new(Mutex::new(None))
-// }
+impl Controls {
+    /// Creates new, unattached media controls
+    pub fn new(config: Config) -> Arc<Mutex<Self>> {
+        let platform = PlatformConfig {
+            dbus_name: "musicbee",
+            display_name: "MusicBee",
+            hwnd: None, // windows only
+        };
 
-pub fn create(config: Config) -> MediaControls {
-    let platform = PlatformConfig {
-        dbus_name: "musicbee",
-        display_name: "MusicBee",
-        hwnd: None, // this program isn't for windows
-    };
+        let controls = MediaControls::new(platform).unwrap();
 
-    let mut controls = MediaControls::new(platform).unwrap();
+        Arc::new(Mutex::new(Self {
+            controls,
+            config
+        }))
+    }
 
-    // The closure must be Send and have a static lifetime.
-    controls
-        .attach(move |event| handle_event(event, &config))
-        .unwrap();
+    /// Creates new media controls and attaches
+    pub fn init(config: Config) -> Arc<Mutex<Self>> {
+        let controls = Self::new(config);
+        controls.lock().unwrap().attach();
+        controls
+    }
 
-    controls
+    /// Attaches media controls to a handler
+    pub fn attach(&mut self) {
+        let config = self.config.clone();
+
+        self.controls
+            .attach(move |event| handle_event(event, &config))
+            .unwrap();
+    }
+
+    /// Detatches the media controls from a handler
+    pub fn detach(&mut self) {
+        self.controls.detach().unwrap();
+    }
+
+    /// Delegate to set the metadata of the controls
+    pub fn set_metadata(&mut self, metadata: MediaMetadata) -> Result<(), Error> {
+        self.controls.set_metadata(metadata)
+    }
+
+    // / Delegate to set the playback of the controls
+    pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<(), Error> {
+        self.controls.set_playback(playback)
+    }
 }
 
 fn handle_event(event: MediaControlEvent, config: &Config) {
