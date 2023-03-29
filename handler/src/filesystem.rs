@@ -1,8 +1,8 @@
 use std::{path::Path, ops::Deref, ffi::OsStr, fs::{self, OpenOptions, File}, time::Duration, os, thread};
 
+use log::*;
 use souvlaki::{MediaControls, MediaPlayback, MediaMetadata};
 use notify::{Watcher, RecursiveMode, Result, event::*, RecommendedWatcher};
-use const_format::concatcp;
 
 use crate::config::Config;
 
@@ -20,9 +20,7 @@ pub fn watch_filesystem(mut controls: MediaControls, config: Config) -> Recommen
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
         handle_event(event, &mut controls, &config)
-    })
-        .unwrap();
-
+    }).unwrap();
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)
         .unwrap();
 
@@ -85,9 +83,9 @@ fn get_playback(config: &Config) -> Option<MediaPlayback> {
         "stopped" => Some(MediaPlayback::Stopped),
         "paused" => Some(MediaPlayback::Paused { progress: None }),
         "playing" => Some(MediaPlayback::Playing { progress: None }),
-        "" => None,
+        "" => None, // empty files are normal when they're being created
         _ => {
-            panic!("playback value {playback} not found");
+            error!("Playback value {playback} not found"); None
         }
     }
 }
@@ -96,6 +94,10 @@ fn update_metadata(controls: &mut MediaControls, config: &Config) {
     let metadata = config.read_comm_file(METADATA_FILE)
         .unwrap();
 
+    // empty files are normal when they're being created
+    if metadata.is_empty() { return; }
+
+    // split data by lines
     let lines: Vec<_> = metadata.lines().collect();
 
     if let [ title, album, artist, cover_url, duration ] = lines[..] {
@@ -105,17 +107,46 @@ fn update_metadata(controls: &mut MediaControls, config: &Config) {
             title: Some(title),
             album: Some(album),
             artist: Some(artist),
-            cover_url: map_cover(cover_url, config).as_deref(),
+            cover_url: map_cover(cover_url, config, artist, title).as_deref(),
             duration: Some(duration),
         })
             .unwrap();
+    } else {
+        warn!("Got malformed metadata from file, found:\n{metadata}")
     }
 }
 
-fn map_cover(cover: &str, config: &Config) -> Option<String> {
+fn map_cover(
+    cover: &str, config: &Config,
+    artist: &str, title: &str
+) -> Option<String> {
     // if the cover is empty then just return no cover
     // TODO: investigate empty cover art
-    if cover.is_empty() { return None }
+    // it seems to be a problem with weird filenames
+    if cover.is_empty() {
+        error!("Got no cover for track: {artist} - {title}");
+        return None;
+    }
 
-    Some("file://".to_string() + &config.map_filename(cover))
+    let cover = &config.map_filename(cover);
+
+    validate_cover(cover, artist, title).map(
+        |file| format!("file://{file}")
+    )
+}
+
+// validates the cover and fixes it if possible
+fn validate_cover(cover: &str, artist: &str, title: &str) -> Option<String> {
+    // if the file exists then it's all good
+    if Path::new(cover).exists() { return Some(cover.to_owned()); }
+
+    // sometimes musicbee messes up and forgets a capital for some unknowable reason
+    if cover.ends_with("folder.jpg") {
+        let capitalized = cover.replace("folder.jpg", "Folder.jpg");
+        if Path::new(&capitalized).exists() { return Some(capitalized) }
+    }
+
+    error!("Got cover for track: {artist} - {title} at {cover}, but no file was found there");
+
+    None
 }

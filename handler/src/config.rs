@@ -23,7 +23,7 @@ pub struct Config {
 
 impl Config {
     pub fn get_comm_path(&self, name: &str) -> String {
-        self.communication_directory.clone() + name
+        format!("{}/{name}", self.communication_directory)
     }
 
     pub fn read_comm_file(&self, name: &str) -> io::Result<String> {
@@ -50,11 +50,11 @@ impl Default for Config {
         let username = home_dir.replace("/home/", "");
 
         // TODO: this is an unreasonable default
-        let wine_prefix = format!("/home/{username}/Documents/executables/musicbee/.wine");
+        let wine_prefix = format!("{home_dir}/Documents/executables/musicbee/.wine");
 
         Self {
             musicbee_location: r#"C:/Program Files/MusicBee/MusicBee.exe"#.to_string(),
-            communication_directory: "/tmp/musicbee-mediakeys/".to_string(),
+            communication_directory: "/tmp/musicbee-mediakeys".to_string(),
             // NOTE: this might be unreasonable, but i'm not sure
             music_file_mapper: Mapping {
                 from: format!("C:/Users/{username}/Music"),

@@ -7,6 +7,7 @@ mod media_controls;
 mod tray;
 mod filesystem;
 mod config;
+mod logger;
 
 use std::env;
 
@@ -21,11 +22,14 @@ fn main() {
     
     let config = config::get_config();
 
+    // start logging to file
+    logger::init(&config);
+
     // initialize gtk
     gtk::init().unwrap();
 
     // start system tray
-    tray::create();
+    tray::create(config.clone());
 
     // attach to media controls
     let media_controls = media_controls::create(config.clone());

@@ -1,8 +1,15 @@
-use std::process::Command;
+use std::{process::Command, sync::{Arc, Mutex}};
 
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig};
 
 use crate::config::Config;
+
+// spoilers
+// pub type Controls = Arc<Mutex<Option<MediaControls>>>;
+
+// pub fn initialize() -> Controls {
+//     Arc::new(Mutex::new(None))
+// }
 
 pub fn create(config: Config) -> MediaControls {
     let platform = PlatformConfig {
