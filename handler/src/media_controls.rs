@@ -2,7 +2,7 @@ use std::{process::Command, sync::{Arc, Mutex}};
 
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error};
 
-use crate::config::Config;
+use crate::{config::Config, filesystem};
 
 pub struct Controls {
     controls: MediaControls,
@@ -40,6 +40,9 @@ impl Controls {
         self.controls
             .attach(move |event| handle_event(event, &config))
             .unwrap();
+
+        // TODO: move this function to an Arc<Mutex<Self>> impl
+        // filesystem::update(self, &self.config);
     }
 
     /// Detatches the media controls from a handler
@@ -74,5 +77,6 @@ fn run_command(command: &str, config: &Config) {
         .env("WINEPREFIX", &config.wine_prefix)
         .arg(&config.musicbee_location)
         .arg(command)
-        .spawn();
+        .spawn().unwrap()
+        .wait().unwrap();
 }
