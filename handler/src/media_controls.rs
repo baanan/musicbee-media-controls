@@ -1,5 +1,6 @@
 use std::{process::Command, sync::{Arc, Mutex}};
 
+use log::debug;
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error};
 
 use crate::{config::Config, filesystem};
@@ -73,10 +74,14 @@ fn handle_event(event: MediaControlEvent, config: &Config) {
 }
 
 fn run_command(command: &str, config: &Config) {
-    let _ = Command::new("wine")
-        .env("WINEPREFIX", &config.wine_prefix)
+    let mut cmd = Command::new("wine");
+     cmd.env("WINEPREFIX", &config.wine_prefix)
         .arg(&config.musicbee_location)
-        .arg(command)
+        .arg(command);
+
+    debug!("Running command: \n    WINEPREFIX={} wine {} {}", config.wine_prefix, config.musicbee_location, command);
+
+    let _ = cmd
         .spawn().unwrap()
         .wait().unwrap();
 }
