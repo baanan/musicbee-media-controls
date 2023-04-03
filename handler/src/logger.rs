@@ -13,7 +13,7 @@ pub fn init(config: &Config) {
 
     Builder::new()
         .target(Target::Pipe(target))
-        .filter_level(LevelFilter::Warn)
+        .filter_level(LevelFilter::Info)
         .init();
 }
 

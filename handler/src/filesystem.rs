@@ -1,4 +1,4 @@
-use std::{path::Path, ops::Deref, ffi::OsStr, fs::{OpenOptions}, time::Duration, sync::{Arc, Mutex}};
+use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::{OpenOptions}, time::Duration, sync::{Arc, Mutex}};
 
 use log::*;
 use souvlaki::{MediaPlayback, MediaMetadata};
@@ -83,12 +83,13 @@ fn get_playback(config: &Config) -> Option<MediaPlayback> {
     // sure, it may not be the most performant to match against a string, 
     // but it's good enough for now
     match playback.trim() {
+        // TODO: detach on stop option
         "stopped" => Some(MediaPlayback::Stopped),
         "paused" => Some(MediaPlayback::Paused { progress: None }),
         "playing" => Some(MediaPlayback::Playing { progress: None }),
         "" => None, // empty files are normal when they're being created
         _ => {
-            error!("Playback value {playback} not found"); None
+            error!("Playback value {} not found", playback.trim()); None
         }
     }
 }
@@ -143,16 +144,45 @@ fn map_cover(
 
 // validates the cover and fixes it if possible
 fn validate_cover(cover: &str, artist: &str, title: &str) -> Option<String> {
+    let path = Path::new(cover);
+
     // if the file exists then it's all good
-    if Path::new(cover).exists() { return Some(cover.to_owned()); }
+    if path.exists() { return Some(cover.to_owned()); }
 
     // sometimes musicbee messes up and forgets a capital for some unknowable reason
-    if cover.ends_with("folder.jpg") {
-        let capitalized = cover.replace("folder.jpg", "Folder.jpg");
-        if Path::new(&capitalized).exists() { return Some(capitalized) }
+    if let Some(capitalized) = change_cover_capitalization(path) {
+        info!("Got cover for track: {artist} - {title} at {cover}, but it was missing. Trying {} instead", capitalized.display());
+
+        if capitalized.exists() {
+            info!("Cover with changed capitalization was found");
+            return Some(capitalized.into_os_string().into_string().unwrap())
+        }
     }
 
     error!("Got cover for track: {artist} - {title} at {cover}, but no file was found there");
 
     None
+}
+
+fn change_cover_capitalization(path: &Path) -> Option<PathBuf> {
+    let Some(filename) = path.file_stem().and_then(OsStr::to_str) else { return None };
+
+    // only the folder covers get messed up
+    // and it's annoying to capitalize the first letter of a string
+    // so might as well just hardcode it
+    let replacement = match filename {
+        "folder" => "Folder",
+        "Folder" => "folder",
+        "cover"  => "Cover",
+        "Cover"  => "cover",
+        _ => return None,
+    };
+
+    let mut new = replacement.to_owned();
+
+    if let Some(extension) = path.extension().and_then(OsStr::to_str) {
+        new = new + "." + extension;
+    }
+
+    Some(path.with_file_name(new))
 }
