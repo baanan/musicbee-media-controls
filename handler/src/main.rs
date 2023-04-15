@@ -9,6 +9,8 @@ mod filesystem;
 mod config;
 mod logger;
 
+use std::sync::Arc;
+
 // cargo is too dumb to realize that it's being used out of debug
 #[allow(unused_imports)]
 use daemonize::Daemonize;
@@ -20,10 +22,10 @@ fn main() {
     Daemonize::new()
         .start().expect("Failed to start daemon");
     
-    let config = config::get_config();
+    let config = Arc::new(config::get_config());
 
     // start logging to file
-    logger::init(&config);
+    logger::init(&config.clone());
 
     // initialize gtk
     gtk::init().unwrap();

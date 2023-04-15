@@ -2,9 +2,9 @@ use std::sync::{Mutex, Arc};
 
 use tray_item::TrayItem;
 
-use crate::{logger, config::Config, media_controls::Controls, filesystem};
+use crate::{logger, config::Config, media_controls::{Controls, self}, filesystem};
 
-pub fn create(controls: Arc<Mutex<Controls>>, config: Config) {
+pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) {
     let mut tray = TrayItem::new("MusicBee Media Controls", "accessories-calculator").unwrap();
 
     tray.add_label("MusicBee Media Controls").unwrap();
@@ -18,7 +18,6 @@ pub fn create(controls: Arc<Mutex<Controls>>, config: Config) {
         let config = config.clone();
         tray.add_menu_item("Attach", move || {
             controls.lock().unwrap().attach();
-            filesystem::update(controls.clone(), &config)
         }).unwrap();
     }
 
@@ -32,7 +31,7 @@ pub fn create(controls: Arc<Mutex<Controls>>, config: Config) {
     {
         let config = config.clone();
         tray.add_menu_item("Refresh", move || {
-            filesystem::update(controls.clone(), &config);
+            filesystem::update(&mut controls.lock().unwrap(), &config);
         }).unwrap();
     }
 

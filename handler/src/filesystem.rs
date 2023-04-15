@@ -10,13 +10,13 @@ use crate::{config::Config, media_controls::Controls};
 const METADATA_FILE: &str = "metadata";
 const PLAYBACK_FILE: &str = "playback";
 
-pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Config) -> RecommendedWatcher {
+pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> RecommendedWatcher {
     let communication_directory = config.communication_directory.clone();
 
     create_file_structure(&config);
 
     // get initial info
-    update(controls.clone(), &config);
+    update(&mut controls.lock().unwrap(), &config);
 
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
@@ -39,7 +39,7 @@ fn create_file_structure(config: &Config) {
         .open(config.get_comm_path(PLAYBACK_FILE)).unwrap();
 }
 
-fn handle_event(event: Result<Event>, mut controls: Arc<Mutex<Controls>>, config: &Config) {
+fn handle_event(event: Result<Event>, controls: Arc<Mutex<Controls>>, config: &Config) {
     let Ok(event) = event else { return };
 
     if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
@@ -50,8 +50,8 @@ fn handle_event(event: Result<Event>, mut controls: Arc<Mutex<Controls>>, config
 
         for file_name in file_names {
             match file_name {
-                METADATA_FILE => update_metadata(&mut controls, config),
-                PLAYBACK_FILE => update_playback(&mut controls, config),
+                METADATA_FILE => update_metadata(&mut controls.lock().unwrap(), config),
+                PLAYBACK_FILE => update_playback(&mut controls.lock().unwrap(), config),
                 // TODO: plugin availablity watcher
                 _ => {},
             }
@@ -59,12 +59,12 @@ fn handle_event(event: Result<Event>, mut controls: Arc<Mutex<Controls>>, config
     }
 }
 
-pub fn update(mut controls: Arc<Mutex<Controls>>, config: &Config) {
-    update_metadata(&mut controls, config);
-    update_playback(&mut controls, config);
+pub fn update(controls: &mut Controls, config: &Config) {
+    update_metadata(controls, config);
+    update_playback(controls, config);
 }
 
-fn update_playback(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
+fn update_playback(controls: &mut Controls, config: &Config) {
     let playback = config.read_comm_file(PLAYBACK_FILE)
         .unwrap();
 
@@ -94,13 +94,13 @@ fn update_playback(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
             }
         };
 
-        controls.lock().unwrap()
+        controls
             .set_playback(playback)
             .unwrap();
     }   
 }
 
-fn update_metadata(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
+fn update_metadata(controls: &mut Controls, config: &Config) {
     let metadata = config.read_comm_file(METADATA_FILE)
         .unwrap();
 
@@ -115,7 +115,7 @@ fn update_metadata(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
 
         let duration = Duration::from_millis(duration.parse().unwrap());
 
-        controls.lock().unwrap()
+        controls
             .set_metadata(MediaMetadata {
                 title: Some(title),
                 album: Some(album),

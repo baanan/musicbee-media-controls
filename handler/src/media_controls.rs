@@ -7,12 +7,12 @@ use crate::{config::Config, filesystem};
 
 pub struct Controls {
     controls: MediaControls,
-    config: Config,
+    config: Arc<Config>,
 }
 
 impl Controls {
     /// Creates new, unattached media controls
-    pub fn new(config: Config) -> Arc<Mutex<Self>> {
+    pub fn new(config: Arc<Config>) -> Arc<Mutex<Self>> {
         let platform = PlatformConfig {
             dbus_name: "musicbee",
             display_name: "MusicBee",
@@ -28,7 +28,7 @@ impl Controls {
     }
 
     /// Creates new media controls and attaches
-    pub fn init(config: Config) -> Arc<Mutex<Self>> {
+    pub fn init(config: Arc<Config>) -> Arc<Mutex<Self>> {
         let controls = Self::new(config);
         controls.lock().unwrap().attach();
         controls
@@ -43,6 +43,8 @@ impl Controls {
         self.controls
             .attach(move |event| handle_event(event, &config))
             .unwrap();
+
+        filesystem::update(self, &self.config.clone())
     }
 
     /// Detatches the media controls from a handler
