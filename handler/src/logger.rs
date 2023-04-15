@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use env_logger::{Builder, Target};
+use env_logger::Target;
 use log::LevelFilter;
 
 use crate::config::Config;
@@ -11,9 +11,11 @@ pub fn init(config: &Config) {
     let dir = &config.communication_directory;
     let target = Box::new(File::create(format!("{dir}/{FILE}")).unwrap());
 
-    Builder::new()
+    env_logger::Builder::new()
         .target(Target::Pipe(target))
-        .filter_level(LevelFilter::Info)
+        .filter_level(LevelFilter::Warn)
+        .filter_module("handler", LevelFilter::Trace) // INFO: this is the current crate, change if
+                                                      // the name changes
         .init();
 }
 

@@ -100,6 +100,7 @@ namespace MusicBeePlugin
                     this.Activate();
                     break;
                 case NotificationType.TrackChanged:
+                // TODO: this doesn't do the right thing, find some other event for when the current file's tags are changed
                 case NotificationType.TagsChanged: // dunno if this does anything but might as well
                     this.UpdateMetaData();
                     break;
