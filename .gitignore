@@ -2,3 +2,4 @@ target/
 Cargo.lock
 .cargo/
 .wine/
+mb_LinuxMediaControls.dll

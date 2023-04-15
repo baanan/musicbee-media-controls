@@ -57,6 +57,7 @@ impl Controls {
 
     // / Delegate to set the playback of the controls
     pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<(), Error> {
+        // TODO: detach on stop option
         self.controls.set_playback(playback)
     }
 }

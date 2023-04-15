@@ -1,7 +1,7 @@
 use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::{OpenOptions}, time::Duration, sync::{Arc, Mutex}};
 
 use log::*;
-use souvlaki::{MediaPlayback, MediaMetadata};
+use souvlaki::{MediaPlayback, MediaMetadata, MediaPosition};
 use notify::{Watcher, RecursiveMode, Result, event::*, RecommendedWatcher};
 use url::Url;
 
@@ -65,31 +65,39 @@ pub fn update(mut controls: Arc<Mutex<Controls>>, config: &Config) {
 }
 
 fn update_playback(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
-    if let Some(playback) = get_playback(config) {
+    let playback = config.read_comm_file(PLAYBACK_FILE)
+        .unwrap();
+
+    // empty files are normal when they're being created
+    if playback.is_empty() { return; }
+
+    // split data by lines
+    let lines: Vec<_> = playback.lines().collect();
+
+    if let [ playback, progress ] = lines[..] {
         debug!("updating playback: {playback:?}");
+
+        let progress = progress
+            .parse::<u64>()
+            .map(Duration::from_millis)
+            .map(|pos| Some(MediaPosition(pos)))
+            .unwrap();
+
+        // sure, it may not be the most performant to match against a string, 
+        // but it's good enough for now
+        let playback = match playback.trim() {
+            "stopped" => MediaPlayback::Stopped,
+            "paused"  => MediaPlayback::Paused { progress },
+            "playing" => MediaPlayback::Playing { progress },
+            _ => {
+                error!("Playback value {} not found", playback.trim()); return;
+            }
+        };
 
         controls.lock().unwrap()
             .set_playback(playback)
             .unwrap();
-    }
-}
-
-fn get_playback(config: &Config) -> Option<MediaPlayback> {
-    let playback = config.read_comm_file(PLAYBACK_FILE)
-        .unwrap();
-
-    // sure, it may not be the most performant to match against a string, 
-    // but it's good enough for now
-    match playback.trim() {
-        // TODO: detach on stop option
-        "stopped" => Some(MediaPlayback::Stopped),
-        "paused" => Some(MediaPlayback::Paused { progress: None }),
-        "playing" => Some(MediaPlayback::Playing { progress: None }),
-        "" => None, // empty files are normal while they're being created
-        _ => {
-            error!("Playback value {} not found", playback.trim()); None
-        }
-    }
+    }   
 }
 
 fn update_metadata(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
