@@ -134,7 +134,7 @@ fn map_cover(
     let cover = &config.map_filename(cover);
 
     validate_cover(cover, artist, title)
-        // .map(|file| Url::from_file_path(file).unwrap().to_string())
+        .map(|file| Url::from_file_path(file).unwrap().to_string())
 }
 
 // validates the cover and fixes it if possible
