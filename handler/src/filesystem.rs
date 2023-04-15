@@ -3,6 +3,7 @@ use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::{OpenOptions}, time
 use log::*;
 use souvlaki::{MediaPlayback, MediaMetadata};
 use notify::{Watcher, RecursiveMode, Result, event::*, RecommendedWatcher};
+use url::Url;
 
 use crate::{config::Config, media_controls::Controls};
 
@@ -64,11 +65,8 @@ pub fn update(mut controls: Arc<Mutex<Controls>>, config: &Config) {
 }
 
 fn update_playback(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
-    let playback = get_playback(config);
-
-    // TODO: don't panic when playback not found
-    if let Some(playback) = playback {
-        info!("updating playback");
+    if let Some(playback) = get_playback(config) {
+        debug!("updating playback: {playback:?}");
 
         controls.lock().unwrap()
             .set_playback(playback)
@@ -87,7 +85,7 @@ fn get_playback(config: &Config) -> Option<MediaPlayback> {
         "stopped" => Some(MediaPlayback::Stopped),
         "paused" => Some(MediaPlayback::Paused { progress: None }),
         "playing" => Some(MediaPlayback::Playing { progress: None }),
-        "" => None, // empty files are normal when they're being created
+        "" => None, // empty files are normal while they're being created
         _ => {
             error!("Playback value {} not found", playback.trim()); None
         }
@@ -105,7 +103,7 @@ fn update_metadata(controls: &mut Arc<Mutex<Controls>>, config: &Config) {
     let lines: Vec<_> = metadata.lines().collect();
 
     if let [ title, album, artist, cover_url, duration ] = lines[..] {
-        info!("updating metadata");
+        debug!("updating metadata: {artist} - {title}");
 
         let duration = Duration::from_millis(duration.parse().unwrap());
 
@@ -128,18 +126,15 @@ fn map_cover(
     artist: &str, title: &str
 ) -> Option<String> {
     // if the cover is empty then just return no cover
-    // TODO: investigate empty cover art
-    // it seems to be a problem with weird filenames
     if cover.is_empty() {
-        error!("Got no cover for track: {artist} - {title}");
+        warn!("Got no cover for track: {artist} - {title}");
         return None;
     }
 
     let cover = &config.map_filename(cover);
 
-    validate_cover(cover, artist, title).map(
-        |file| format!("file://{file}")
-    )
+    validate_cover(cover, artist, title)
+        // .map(|file| Url::from_file_path(file).unwrap().to_string())
 }
 
 // validates the cover and fixes it if possible

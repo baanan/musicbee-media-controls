@@ -1,6 +1,6 @@
 use std::{process::Command, sync::{Arc, Mutex}};
 
-use log::debug;
+use log::*;
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error};
 
 use crate::{config::Config, filesystem};
@@ -35,15 +35,14 @@ impl Controls {
     }
 
     /// Attaches media controls to a handler
+    ///
+    /// Notice: data never gets set, please run [`filesystem::update`] after attach
     pub fn attach(&mut self) {
         let config = self.config.clone();
 
         self.controls
             .attach(move |event| handle_event(event, &config))
             .unwrap();
-
-        // TODO: move this function to an Arc<Mutex<Self>> impl
-        // filesystem::update(self, &self.config);
     }
 
     /// Detatches the media controls from a handler
@@ -63,25 +62,14 @@ impl Controls {
 }
 
 fn handle_event(event: MediaControlEvent, config: &Config) {
+    trace!("Recieved control event: {event:?}");
+
     use MediaControlEvent::*;
     match event {
-        Play | Pause | Toggle => run_command("/PlayPause", config),
-        Next => run_command("/Next", config),
-        Previous => run_command("/Previous", config),
-        Stop => run_command("/Stop", config),
-        _ => todo!(),
+        Play | Pause | Toggle => config.run_command("/PlayPause"),
+        Next => config.run_command("/Next"),
+        Previous => config.run_command("/Previous"),
+        Stop => config.run_command("/Stop"),
+        _ => { error!("Event {event:?} not implemented") } // TODO: implement other events
     }
-}
-
-fn run_command(command: &str, config: &Config) {
-    let mut cmd = Command::new("wine");
-     cmd.env("WINEPREFIX", &config.wine_prefix)
-        .arg(&config.musicbee_location)
-        .arg(command);
-
-    debug!("Running command: \n    WINEPREFIX={} wine {} {}", config.wine_prefix, config.musicbee_location, command);
-
-    let _ = cmd
-        .spawn().unwrap()
-        .wait().unwrap();
 }
