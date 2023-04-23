@@ -40,6 +40,8 @@ impl Controls {
     ///
     /// Notice: data never gets set, please run [`filesystem::update`] after attach
     pub fn attach(&mut self) {
+        trace!("Attaching");
+
         let config = self.config.clone();
 
         self.controls
@@ -52,6 +54,7 @@ impl Controls {
 
     /// Detatches the media controls from a handler
     pub fn detach(&mut self) {
+        trace!("Detaching");
         self.controls.detach().unwrap();
         self.attached = false;
     }
@@ -62,7 +65,7 @@ impl Controls {
         Ok(())
     }
 
-    // / Delegate to set the playback of the controls
+    /// Delegate to set the playback of the controls
     pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<(), Error> {
         if self.config.detach_on_stop { 
             match playback {

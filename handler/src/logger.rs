@@ -14,8 +14,7 @@ pub fn init(config: &Config) {
     env_logger::Builder::new()
         .target(Target::Pipe(target))
         .filter_level(LevelFilter::Warn)
-        .filter_module("handler", LevelFilter::Trace) // INFO: this is the current crate, change if
-                                                      // the name changes
+        .filter_module(env!("CARGO_CRATE_NAME"), LevelFilter::Trace) // log only from the current crate
         .init();
 }
 

@@ -6,11 +6,11 @@ NOTICE: THIS IS IN VERY EARLY STAGES AND USES MY SPECIFIC CONFIGURATION, WAIT UN
 
 - [ ] media controls
   - [x] basic functionality
-  - [ ] attach / detach
+  - [x] attach / detach
+  - [ ] config
   - [ ] all media features
     - [ ] all events (loop, shuffle)
     - [ ] playback times
-  - [ ] config
   - [ ] window raising
   - [ ] custom event handling (like instead of loop, etc)
 - [ ] plugin
