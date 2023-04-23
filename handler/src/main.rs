@@ -1,6 +1,6 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
+// #![allow(dead_code)]
+// #![allow(unused_variables)]
+// #![allow(unused_imports)]
 // TODO: remove unwraps
 
 mod media_controls;
@@ -25,7 +25,7 @@ fn main() {
     let config = Arc::new(config::get_config());
 
     // start logging to file
-    logger::init(&config.clone());
+    logger::init(&config);
 
     // initialize gtk
     gtk::init().unwrap();

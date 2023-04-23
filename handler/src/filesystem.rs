@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::{OpenOptions}, time::Duration, sync::{Arc, Mutex}};
+use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::{Arc, Mutex}};
 
 use log::*;
 use souvlaki::{MediaPlayback, MediaMetadata, MediaPosition};
@@ -11,12 +11,9 @@ const METADATA_FILE: &str = "metadata";
 const PLAYBACK_FILE: &str = "playback";
 
 pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> RecommendedWatcher {
-    let communication_directory = config.communication_directory.clone();
+    let communication_directory = config.communication.directory.clone();
 
     create_file_structure(&config);
-
-    // get initial info
-    update(&mut controls.lock().unwrap(), &config);
 
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
@@ -29,7 +26,7 @@ pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> 
 }
 
 fn create_file_structure(config: &Config) {
-    std::fs::create_dir_all(Path::new(&config.communication_directory)).unwrap();
+    std::fs::create_dir_all(Path::new(&config.communication.directory)).unwrap();
 
     OpenOptions::new()
         .write(true).create(true).truncate(false)

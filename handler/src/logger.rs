@@ -8,7 +8,7 @@ use crate::config::Config;
 const FILE: &str = "handler.log";
 
 pub fn init(config: &Config) {
-    let dir = &config.communication_directory;
+    let dir = &config.communication.directory;
     let target = Box::new(File::create(format!("{dir}/{FILE}")).unwrap());
 
     env_logger::Builder::new()
@@ -20,6 +20,6 @@ pub fn init(config: &Config) {
 }
 
 pub fn open(config: &Config) {
-    let dir = &config.communication_directory;
+    let dir = &config.communication.directory;
     open::that(format!("{dir}/{FILE}")).unwrap();
 }
