@@ -91,9 +91,7 @@ fn update_playback(controls: &mut Controls, config: &Config) {
             }
         };
 
-        controls
-            .set_playback(playback)
-            .unwrap();
+        controls.set_playback(playback).unwrap();
     }   
 }
 

@@ -72,7 +72,7 @@ pub struct Config {
     pub communication: Communication,
     pub music_file_mapper: Mapping,
     pub temporary_file_mapper: Mapping,
-    // pub detach_on_stop: bool,
+    pub detach_on_stop: bool,
 }
 
 impl Config {
@@ -121,7 +121,7 @@ impl Default for Config {
                 to: format!("{wine_prefix}/drive_c/")
             },
             commands,
-            // detach_on_stop: true,
+            detach_on_stop: true,
         }   
     }
 }

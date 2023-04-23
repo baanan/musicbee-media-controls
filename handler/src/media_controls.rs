@@ -1,4 +1,4 @@
-use std::{process::Command, sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 
 use log::*;
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error};
@@ -8,6 +8,7 @@ use crate::{config::Config, filesystem};
 pub struct Controls {
     controls: MediaControls,
     config: Arc<Config>,
+    attached: bool,
 }
 
 impl Controls {
@@ -23,7 +24,8 @@ impl Controls {
 
         Arc::new(Mutex::new(Self {
             controls,
-            config
+            config,
+            attached: false,
         }))
     }
 
@@ -43,6 +45,7 @@ impl Controls {
         self.controls
             .attach(move |event| handle_event(event, &config))
             .unwrap();
+        self.attached = true;
 
         filesystem::update(self, &self.config.clone())
     }
@@ -50,17 +53,27 @@ impl Controls {
     /// Detatches the media controls from a handler
     pub fn detach(&mut self) {
         self.controls.detach().unwrap();
+        self.attached = false;
     }
 
     /// Delegate to set the metadata of the controls
     pub fn set_metadata(&mut self, metadata: MediaMetadata) -> Result<(), Error> {
-        self.controls.set_metadata(metadata)
+        if self.attached { self.controls.set_metadata(metadata)?; }
+        Ok(())
     }
 
     // / Delegate to set the playback of the controls
     pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<(), Error> {
-        // TODO: detach on stop option
-        self.controls.set_playback(playback)
+        if self.config.detach_on_stop { 
+            match playback {
+                MediaPlayback::Stopped if self.attached == true => self.detach(),
+                MediaPlayback::Playing { .. } if self.attached == false => self.attach(),
+                _ => {},
+            }
+        }
+
+        if self.attached { self.controls.set_playback(playback)?; }
+        Ok(())
     }
 }
 
