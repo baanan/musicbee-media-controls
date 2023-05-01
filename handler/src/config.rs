@@ -21,6 +21,7 @@ fn get_username() -> String {
 }
 
 lazy_static!(
+    // searches for multiple things at a time
     pub static ref REFERENCES: AhoCorasick = AhoCorasick::new(["{home_dir}", "{username}", "{wine_prefix}"]).unwrap();
 );
 
@@ -74,6 +75,34 @@ impl ReferencedString {
     }
 }
 
+// resolvers
+
+impl Mapping {
+    pub fn resolve(&mut self, config: &Config) {
+        self.from.resolve(config);
+        self.to.resolve(config);
+    }
+}
+
+impl Commands {
+    pub fn resolve(&mut self, config: &Config) {
+        self.wine_prefix.resolve(config);
+    }
+}
+
+impl Config {
+    pub fn resolve(mut self) -> Self {
+        // config has to be cloned to make sure the values don't change while it's being read
+        let cloned = self.clone();
+        self.music_file_mapper.resolve(&cloned);
+        self.temporary_file_mapper.resolve(&cloned);
+        self.commands.resolve(&cloned);
+        self
+    }
+}
+
+// ReferencedString trait implementations
+
 impl From<&str> for ReferencedString {
     fn from(template: &str) -> Self {
         Self::new(template.to_string())
@@ -97,28 +126,6 @@ impl Display for ReferencedString {
     }
 }
 
-impl Mapping {
-    pub fn resolve(&mut self, config: &mut Config) {
-        self.from.resolve(config);
-        self.to.resolve(config);
-    }
-}
-
-impl Commands {
-    pub fn resolve(&mut self, config: &mut Config) {
-        self.wine_prefix.resolve(config);
-    }
-}
-
-impl Config {
-    pub fn resolve(mut self) -> Self {
-        let mut cloned = self.clone();
-        self.music_file_mapper.resolve(&mut cloned);
-        self.temporary_file_mapper.resolve(&mut cloned);
-        self.commands.resolve(&mut cloned);
-        self
-    }
-}
 
 /// Defines a simple replacement mapping
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -132,6 +139,7 @@ impl Mapping {
         string.replace(self.from.get(), self.to.get())
     }
 }
+
 
 /// Info for running commands on MusicBee
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -158,6 +166,7 @@ impl Commands {
     }
 }
 
+
 /// Info for communication between the handler and the plugin
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Communication {
@@ -174,8 +183,10 @@ impl Communication {
     }
 }
 
+
 // TODO: wrap in another type to make sure it gets resolved
 
+/// Global Config for the application
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub commands: Commands,
@@ -211,6 +222,7 @@ impl Config {
     }
 }
 
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -225,7 +237,8 @@ impl Default for Config {
                 to: "{wine_prefix}/drive_c/".into(),
             },
             detach_on_stop: true,
-        }.resolve()
+        }
+            .resolve()
     }
 }
 
@@ -248,6 +261,8 @@ impl Default for Communication {
     }
 }
 
+
+// FIX: use that other dirs crate
 fn config_folder() -> PathBuf {
     dirs::config_dir().unwrap()
         .join("musicbee-mediakeys")
@@ -260,24 +275,34 @@ fn config_path() -> PathBuf {
 pub fn get_config() -> Config {
     let path = config_path();
 
-    if path.exists() {
-        let config = 
-            ron::from_str::<Config>(
-                &fs::read_to_string(&path)
-                    .unwrap()
-            );
+    // deserialize path
 
-        if let Ok(config) = config {
-            return config.resolve();
-        } // otherwise replace it with the default
+    if path.exists() {
+        let deserialized = deserialize(&fs::read_to_string(&path).unwrap());
+        if let Some(config) = deserialized {
+            return config;
+        }
     } 
 
+    // fallback
+
     let config = Config::default();
+    let serialized = ron::ser::to_string_pretty(&config, PrettyConfig::new()).unwrap();
 
     fs::create_dir_all(config_folder()).unwrap();
-    fs::write(path,
-        ron::ser::to_string_pretty(&config, PrettyConfig::new()).unwrap()
-    ).unwrap();
+    fs::write(path, serialized).unwrap();
 
     config
+}
+
+fn deserialize(string: &str) -> Option<Config> {
+    let config = ron::from_str::<Config>(string);
+
+    match config {
+        Ok(config) => Some(config.resolve()),
+        Err(err) => {
+            error!("failed to deserialize config, got {}", err);
+            None
+        },
+    }
 }
