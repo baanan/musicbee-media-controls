@@ -37,26 +37,32 @@ impl Controls {
     }
 
     /// Attaches media controls to a handler
-    ///
-    /// Notice: data never gets set, please run [`filesystem::update`] after attach
     pub fn attach(&mut self) {
-        trace!("Attaching");
+        if !self.attached {
+            trace!("Attaching");
 
-        let config = self.config.clone();
+            let config = self.config.clone();
 
-        self.controls
-            .attach(move |event| handle_event(event, &config))
-            .unwrap();
-        self.attached = true;
+            self.controls
+                .attach(move |event| handle_event(event, &config))
+                .unwrap();
+            self.attached = true;
 
-        filesystem::update(self, &self.config.clone())
+            filesystem::update(self, &self.config.clone())
+        } else {
+            trace!("Tried to attach when already attached")
+        }
     }
 
     /// Detatches the media controls from a handler
     pub fn detach(&mut self) {
-        trace!("Detaching");
-        self.controls.detach().unwrap();
-        self.attached = false;
+        if self.attached {
+            trace!("Detaching");
+            self.controls.detach().unwrap();
+            self.attached = false;
+        } else {
+            trace!("Tried to detach when not attached")
+        }
     }
 
     /// Delegate to set the metadata of the controls
@@ -69,8 +75,8 @@ impl Controls {
     pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<(), Error> {
         if self.config.detach_on_stop { 
             match playback {
-                MediaPlayback::Stopped if self.attached == true => self.detach(),
-                MediaPlayback::Playing { .. } if self.attached == false => self.attach(),
+                MediaPlayback::Stopped if self.attached => self.detach(),
+                MediaPlayback::Playing { .. } if !self.attached => self.attach(),
                 _ => {},
             }
         }

@@ -11,7 +11,7 @@ const METADATA_FILE: &str = "metadata";
 const PLAYBACK_FILE: &str = "playback";
 
 pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> RecommendedWatcher {
-    let communication_directory = config.communication.directory.get().clone();
+    let communication_directory = config.communication.directory.clone();
 
     create_file_structure(&config);
 
@@ -26,7 +26,7 @@ pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> 
 }
 
 fn create_file_structure(config: &Config) {
-    std::fs::create_dir_all(Path::new(config.communication.directory.get())).unwrap();
+    std::fs::create_dir_all(Path::new(&config.communication.directory)).unwrap();
 
     OpenOptions::new()
         .write(true).create(true).truncate(false)
