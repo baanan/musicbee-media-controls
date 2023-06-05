@@ -24,6 +24,8 @@ fn main() {
     
     let config = Arc::new(config::get_config());
 
+    filesystem::create_file_structure(&config);
+
     // start logging to file
     logger::init(&config);
 

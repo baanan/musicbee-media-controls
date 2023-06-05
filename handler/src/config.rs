@@ -25,116 +25,136 @@ lazy_static!(
     pub static ref REFERENCES: AhoCorasick = AhoCorasick::new(["{home_dir}", "{username}", "{wine_prefix}"]).unwrap();
 );
 
-fn replace(key: &str, config: &Config) -> String {
+fn replace(key: &str, config: &UnresolvedConfig) -> String {
     match key {
         "{home_dir}" => get_home_dir(),
         "{username}" => get_username(),
-        "{wine_prefix}" => config.commands.wine_prefix.get_checked(config),
+        "{wine_prefix}" => config.commands.wine_prefix.get_recursive(config),
         _ => panic!("tried to get the replacement for {key}, but it has no replacement"),
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(transparent)] // makes the reference act like a normal string when serialized
-pub struct ReferencedString {
+#[derive(Clone, Deserialize)]
+pub struct UnresolvedReference {
     template: String,
-    #[serde(skip)]
-    referred: Option<String>,
 }
 
-impl ReferencedString {
-    pub fn new(template: String) -> Self {
-        Self {
-            template,
-            referred: None,
+impl UnresolvedReference {
+    /// Gets the resolved value of a reference and saves it
+    pub fn resolve(self, config: &UnresolvedConfig) -> ReferencedString {
+        ReferencedString {
+            referred: Self::resolve_str(&self.template, config),
+            template: self.template,
         }
     }
 
-    /// Gets the resolved value, panicking if it hasn't been resolved. A [Config] must
-    /// be resolved after creation, so it is safe to use this method while in one.
-    pub fn get(&self) -> &str {
-        self.referred.as_ref().expect("tried to use an unresolved referenced string")
-    }
-
-    /// Gets the resolved value of the string without saving it
-    pub fn get_checked(&self, config: &Config) -> String {
-        self.referred.to_owned().unwrap_or_else(|| Self::resolve_str(&self.template, config))
-    }
-
-    /// Gets the resolved value of a reference and saves it
-    pub fn resolve(&mut self, config: &Config) -> &str {
-        self.referred.get_or_insert_with(|| Self::resolve_str(&self.template, config))
-    }
-
-    fn resolve_str(template: &str, config: &Config) -> String {
+    fn resolve_str(template: &str, config: &UnresolvedConfig) -> String {
         let mut result = String::new();
         REFERENCES.replace_all_with(template, &mut result, |_, mat, dst| {
             dst.push_str(&replace(mat, config)); true
         });
         result
     }
+
+    fn get_recursive(&self, config: &UnresolvedConfig) -> String {
+        Self::resolve_str(&self.template, config)
+    }
+}
+
+impl From<&str> for UnresolvedReference {
+    fn from(template: &str) -> Self {
+        UnresolvedReference { template: template.to_owned() }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(transparent)] // makes the reference act like a normal string when serialized
+pub struct ReferencedString {
+    template: String,
+    #[serde(skip)]
+    referred: String,
+}
+
+impl ReferencedString {
+    pub fn get(&self) -> &str {
+        &self.referred
+    }
 }
 
 // resolvers
 
-impl Mapping {
-    pub fn resolve(&mut self, config: &Config) {
-        self.from.resolve(config);
-        self.to.resolve(config);
+impl Mapping<UnresolvedReference> {
+    pub fn resolve(self, config: &UnresolvedConfig) -> Mapping<ReferencedString> {
+        Mapping {
+            from: self.from.resolve(config),
+            to: self.to.resolve(config)
+        }
     }
 }
 
-impl Commands {
-    pub fn resolve(&mut self, config: &Config) {
-        self.wine_prefix.resolve(config);
+impl Commands<UnresolvedReference> {
+    pub fn resolve(self, config: &UnresolvedConfig) -> Commands<ReferencedString> {
+        Commands {
+            wine_prefix: self.wine_prefix.resolve(config),
+            wine_command: self.wine_command,
+            musicbee_location: self.musicbee_location,
+        }
     }
 }
 
-impl Config {
-    pub fn resolve(mut self) -> Self {
-        // config has to be cloned to make sure the values don't change while it's being read
+impl UnresolvedConfig {
+    pub fn resolve(self) -> Config {
+        // the config has to be cloned to make sure the values don't change while it's being read
         let cloned = self.clone();
-        self.music_file_mapper.resolve(&cloned);
-        self.temporary_file_mapper.resolve(&cloned);
-        self.commands.resolve(&cloned);
-        self
+        Config {
+            music_file_mapper: self.music_file_mapper.resolve(&cloned),
+            temporary_file_mapper: self.temporary_file_mapper.resolve(&cloned),
+            commands: self.commands.resolve(&cloned),
+            communication: self.communication,
+            detach_on_stop: self.detach_on_stop,
+        }
+    }
+}
+
+impl From<UnresolvedConfig> for Config {
+    fn from(value: UnresolvedConfig) -> Self {
+        value.resolve()
+    }
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> 
+    {
+        UnresolvedConfig::deserialize(deserializer).map(Into::into)
     }
 }
 
 // ReferencedString trait implementations
 
-impl From<&str> for ReferencedString {
-    fn from(template: &str) -> Self {
-        Self::new(template.to_string())
-    }
-}
-
 impl Debug for ReferencedString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.template)?;
-        if let Some(referred) = &self.referred {
-            write!(f, " ({})", referred)?
-        }
+        write!(f, "{} ({})", self.template, self.referred)?;
         Ok(())
     }
 }
 
 impl Display for ReferencedString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string = self.referred.as_ref().unwrap_or(&self.template);
-        write!(f, "{}", string)
+        write!(f, "{}", self.referred)
     }
 }
 
 
 /// Defines a simple replacement mapping
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Mapping {
-    pub from: ReferencedString,
-    pub to: ReferencedString,
+pub struct Mapping<T> {
+    pub from: T,
+    pub to: T,
 }
 
-impl Mapping {
+impl Mapping<ReferencedString> {
     pub fn map(&self, string: &str) -> String {
         string.replace(self.from.get(), self.to.get())
     }
@@ -143,13 +163,13 @@ impl Mapping {
 
 /// Info for running commands on MusicBee
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Commands {
+pub struct Commands<T> {
     pub wine_command: String,
-    pub wine_prefix: ReferencedString,
+    pub wine_prefix: T,
     pub musicbee_location: String,
 }
 
-impl Commands {
+impl Commands<ReferencedString> {
     pub fn run_command(&self, command: &str) {
         let mut cmd = Command::new(&self.wine_command);
          cmd.env("WINEPREFIX", self.wine_prefix.get())
@@ -186,13 +206,16 @@ impl Communication {
 
 // TODO: wrap in another type to make sure it gets resolved
 
+pub type Config = ReferencedConfig<ReferencedString>;
+type UnresolvedConfig = ReferencedConfig<UnresolvedReference>;
+
 /// Global Config for the application
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Config {
-    pub commands: Commands,
+pub struct ReferencedConfig<T> {
+    pub commands: Commands<T>,
     pub communication: Communication,
-    pub music_file_mapper: Mapping,
-    pub temporary_file_mapper: Mapping,
+    pub music_file_mapper: Mapping<T>,
+    pub temporary_file_mapper: Mapping<T>,
     pub detach_on_stop: bool,
 }
 
@@ -225,7 +248,7 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
+        UnresolvedConfig {
             communication: Communication::default(),
             commands: Commands::default(),
             music_file_mapper: Mapping {
@@ -242,7 +265,7 @@ impl Default for Config {
     }
 }
 
-impl Default for Commands {
+impl Default for Commands<UnresolvedReference> {
     fn default() -> Self {
         Self {
             wine_command: "wine".to_string(),
@@ -299,7 +322,7 @@ fn deserialize(string: &str) -> Option<Config> {
     let config = ron::from_str::<Config>(string);
 
     match config {
-        Ok(config) => Some(config.resolve()),
+        Ok(config) => Some(config),
         Err(err) => {
             error!("failed to deserialize config, got {}", err);
             None
