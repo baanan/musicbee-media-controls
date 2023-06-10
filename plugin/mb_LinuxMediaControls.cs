@@ -12,9 +12,9 @@ namespace MusicBeePlugin
 {
     public partial class Plugin
     {
-        private MusicBeeApiInterface mbApiInterface;
         private PluginInfo about = new PluginInfo();
 
+        private MusicBeeApiInterface mbApiInterface;
         private string ConfigDirectory {
             get { return mbApiInterface.Setting_GetPersistentStoragePath() + "\\linux-media-controls"; }
         }
@@ -23,12 +23,11 @@ namespace MusicBeePlugin
             get { return this.ConfigDirectory + "\\config.txt"; }
         }
 
-        private const string metadataFile = "metadata";
-        private const string playbackFile = "playback";
-        private const string activatedFile = "plugin-activated";
-
         private Config config;
+        private Communication communication;
         private ConfigPanel panel;
+
+        private float volume = 1;
 
         public PluginInfo Initialise(IntPtr apiInterfacePtr)
         {
@@ -51,6 +50,8 @@ namespace MusicBeePlugin
             Directory.CreateDirectory(this.ConfigDirectory);
             this.config = this.getConfig();
             this.panel = new ConfigPanel(this.config);
+
+            this.communication = new Communication(this.config, this.mbApiInterface);
 
             this.CreateFileStructure();
 
@@ -95,6 +96,7 @@ namespace MusicBeePlugin
             switch (type)
             {
                 case NotificationType.PluginStartup:
+                    this.UpdateVolume();
                     this.UpdatePlayback();
                     this.UpdateMetaData();
                     this.Activate();
@@ -107,25 +109,49 @@ namespace MusicBeePlugin
                 case NotificationType.PlayStateChanged:
                     this.UpdatePlayback();
                     break;
+                case NotificationType.VolumeLevelChanged:
+
+                    // HACK: the handler communicates to plugin by changing volume.
+                    // If a file in the communication directory has a new action, 
+                    //   then it'll perform that action and reset the volume.
+                    // If it doesn't, then it'll do nothing (which is very 
+                    //   important to not start an infinite loop)
+                    // Find something better if possible.
+                    this.RecieveCommand();
+
+                    break;
             }
         }
+
+        private void RecieveCommand()
+        {
+            if (this.communication.handleAction()) {
+                this.ResetVolume();
+            } else {
+                this.UpdateVolume();
+            }
+        }
+
+        private void UpdateVolume() { this.volume = mbApiInterface.Player_GetVolume(); }
+        private void ResetVolume() { mbApiInterface.Player_SetVolume(this.volume); }
 
         private void CreateFileStructure()
         {
             Directory.CreateDirectory(this.config.rootDirectory);
-            File.Create(this.config.rootDirectory + activatedFile).Close();
-            File.Create(this.config.rootDirectory + playbackFile).Close();
-            File.Create(this.config.rootDirectory + metadataFile).Close();
+            File.Create(this.config.rootDirectory + Communication.activatedFile).Close();
+            File.Create(this.config.rootDirectory + Communication.playbackFile).Close();
+            File.Create(this.config.rootDirectory + Communication.metadataFile).Close();
+            File.Create(this.config.rootDirectory + Communication.actionFile).Close();
         }
 
         private void Activate()
         {
-            File.WriteAllText(this.config.rootDirectory + activatedFile, "true");
+            File.WriteAllText(this.config.rootDirectory + Communication.activatedFile, "true");
         }
 
         private void Deactivate()
         {
-            File.WriteAllText(this.config.rootDirectory + activatedFile, "false");
+            File.WriteAllText(this.config.rootDirectory + Communication.activatedFile, "false");
         }
 
         private void UpdatePlayback() 
@@ -147,7 +173,7 @@ namespace MusicBeePlugin
 
             int position = mbApiInterface.Player_GetPosition();
 
-            File.WriteAllText(this.config.rootDirectory + playbackFile,
+            this.communication.write(Communication.playbackFile,
                 state + "\n" +
                 position
             );
@@ -161,7 +187,7 @@ namespace MusicBeePlugin
             string cover = mbApiInterface.NowPlaying_GetArtworkUrl();
             int duration = mbApiInterface.NowPlaying_GetDuration();
 
-            File.WriteAllText(this.config.rootDirectory + metadataFile, 
+            this.communication.write(Communication.metadataFile,
                 title + "\n" +
                 album + "\n" +
                 artist + "\n" +
@@ -186,6 +212,132 @@ namespace MusicBeePlugin
         private void saveConfig(Config config) {
             File.WriteAllText(this.ConfigFile, config.serialize());
         }
+
+        class Communication {
+            public const string metadataFile = "metadata";
+            public const string playbackFile = "playback";
+            public const string activatedFile = "plugin-activated";
+            public const string actionFile = "action";
+
+            private Config config;
+            private MusicBeeApiInterface mbApiInterface;
+
+            public Communication(Config config, MusicBeeApiInterface mbApiInterface) {
+                this.config = config;
+                this.mbApiInterface = mbApiInterface;
+            }
+
+            public void write(string file, string text) {
+                File.WriteAllText(this.config.rootDirectory + file, text); 
+            }
+
+            public string get(string file) {
+                return File.ReadAllText(this.config.rootDirectory + file);
+            }
+
+            // returns if an action was handled
+            public bool handleAction() {
+                string action = get(Communication.actionFile);
+                if(string.IsNullOrWhiteSpace(action)) return false;
+
+                string[] args = action.Trim().Split();
+
+                // no-arg commands
+                if(args[0] == "play")
+                    mbApiInterface.Player_PlayPause();
+
+                bool volumeChanged = false;
+
+                // single argument commands
+                // TODO: some kind of logging
+                if(args.Length > 1) {
+                    switch (args[0])
+                    {
+                        case "shuffle":
+                            this.updateShuffle(args[1]);
+                            break;
+                        case "repeat":
+                            this.updateRepeat(args[1]);
+                            break;
+                        case "seek":
+                            this.seek(args[1]);
+                            break;
+                        case "position":
+                            this.setPosition(args[1]);
+                            break;
+                        case "volume":
+                            this.setVolume(args[1]);
+                            volumeChanged = true;
+                            break;
+                    }
+                }
+
+                write(Communication.actionFile, "");
+                return !volumeChanged;
+            }
+
+            private void updateShuffle(string arg) 
+            {
+                switch (arg)
+                {
+                    case "on":
+                    case "true":
+                        mbApiInterface.Player_SetShuffle(true);
+                        return;
+                    case "toggle":
+                        mbApiInterface.Player_SetShuffle(!mbApiInterface.Player_GetShuffle());
+                        return;
+                    default: // "off" / "false"
+                        mbApiInterface.Player_SetShuffle(false);
+                        return;
+                }
+            }
+            
+            private void updateRepeat(string arg)
+            {
+                switch (arg)
+                {
+                    case "one":
+                        mbApiInterface.Player_SetRepeat(RepeatMode.One);
+                        return;
+                    case "none":
+                        mbApiInterface.Player_SetRepeat(RepeatMode.None);
+                        return;
+                    default: // "all"
+                        mbApiInterface.Player_SetRepeat(RepeatMode.All);
+                        return;
+                }
+            }
+
+            private void parseIntAnd(string val, Action<int> callback) 
+            {
+                try {
+                    callback(Int32.Parse(val));
+                // TODO: log
+                } catch (FormatException) {}
+            }
+
+            private void seek(string str)
+            {
+                parseIntAnd(str, amt => {
+                    mbApiInterface.Player_SetPosition(mbApiInterface.Player_GetPosition() + amt);
+                });
+            }
+
+            private void setPosition(string str) 
+            {
+                parseIntAnd(str, pos => {
+                    mbApiInterface.Player_SetPosition(pos);
+                });
+            }
+
+            private void setVolume(string str)
+            {
+                parseIntAnd(str, to => {
+                    mbApiInterface.Player_SetVolume((float) to / 100);
+                });
+            }
+        }
     }
 
     [Serializable()]
@@ -207,7 +359,7 @@ namespace MusicBeePlugin
 
         private bool validateRoot() {
             string root = this.rootDirectory;
-            
+
             // replace \ with /
             root = root.Replace('/', '\\');
             // if the root starts with /, assume the user meant a linux location
@@ -273,7 +425,7 @@ namespace MusicBeePlugin
                 AutoSize = true,
                 Location = new Point(0, 0)
             };
-            
+
             this.rootBox = new TextBox() {
                 Bounds = new Rectangle(this.rootLabel.Width, 0, 200, this.rootLabel.Height)
             };

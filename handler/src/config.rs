@@ -127,7 +127,7 @@ impl<'de> Deserialize<'de> for Config {
         where
             D: serde::Deserializer<'de> 
     {
-        UnresolvedConfig::deserialize(deserializer).map(Into::into)
+        UnresolvedConfig::deserialize(deserializer).map(UnresolvedConfig::resolve)
     }
 }
 

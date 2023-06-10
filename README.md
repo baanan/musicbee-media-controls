@@ -6,7 +6,7 @@ NOTICE: THIS IS IN VERY EARLY STAGES, I'LL FIX THINGS (mostly the installation) 
 
 ### Plugin
 
-Copy over plugin/mb_LinuxMediaControls.dll over to your MusicBee plugin folder
+Copy over `plugin/mb_LinuxMediaControls.dll` over to your MusicBee plugin folder
 
 ### Handler
 
@@ -21,6 +21,8 @@ Currently only building from source every time is supported, run `cargo run --re
   - [ ] all media features
     - [x] playback times
     - [ ] all events (loop, shuffle)
+      - [x] plugin
+      - [ ] handler (issue with souvlaki)
   - [ ] window raising
   - [ ] custom event handling (like instead of loop, etc)
 - [ ] plugin
