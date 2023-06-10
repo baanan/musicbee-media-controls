@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, fs, io, env, process::Command, fmt::{Display, Debug}};
+use std::{path::PathBuf, fs, io, env, process::Command, fmt::{Display, Debug}, time::Duration};
 
 use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
@@ -6,6 +6,7 @@ use ron::ser::PrettyConfig;
 use serde::{Serialize, Deserialize};
 
 use log::*;
+use souvlaki::SeekDirection;
 
 // TODO: accept null for mappings 
 
@@ -112,6 +113,7 @@ impl UnresolvedConfig {
             commands: self.commands.resolve(&cloned),
             communication: self.communication,
             detach_on_stop: self.detach_on_stop,
+            seek_amount: self.seek_amount,
         }
     }
 }
@@ -176,7 +178,7 @@ impl Commands<ReferencedString> {
             .arg(&self.musicbee_location)
             .arg(command);
 
-        debug!("Running command: \n    WINEPREFIX={} wine {} {}", self.wine_prefix, self.musicbee_location, command);
+        trace!("Running command: \n    WINEPREFIX={} wine {} {}", self.wine_prefix, self.musicbee_location, command);
 
         let _ = cmd
             .spawn().unwrap()
@@ -194,12 +196,16 @@ pub struct Communication {
 }
 
 impl Communication {
-    pub fn get_comm_path(&self, name: &str) -> String {
-        format!("{}/{name}", self.directory)
+    pub fn get_comm_path(&self, name: &str) -> PathBuf {
+        PathBuf::from(format!("{}/{name}", self.directory))
     }
 
     pub fn read_comm_file(&self, name: &str) -> io::Result<String> {
-        fs::read_to_string(Path::new(&self.get_comm_path(name)))
+        fs::read_to_string(self.get_comm_path(name))
+    }
+
+    pub fn write_comm_file(&self, name: &str, contents: &str) -> io::Result<()> {
+        fs::write(self.get_comm_path(name), contents)
     }
 }
 
@@ -217,6 +223,7 @@ pub struct ReferencedConfig<T> {
     pub music_file_mapper: Mapping<T>,
     pub temporary_file_mapper: Mapping<T>,
     pub detach_on_stop: bool,
+    pub seek_amount: Duration,
 }
 
 impl Config {
@@ -236,12 +243,16 @@ impl Config {
         self.commands.run_command(command)
     }
 
-    pub fn get_comm_path(&self, name: &str) -> String {
+    pub fn get_comm_path(&self, name: &str) -> PathBuf {
         self.communication.get_comm_path(name)
     }
 
     pub fn read_comm_file(&self, name: &str) -> io::Result<String> {
         self.communication.read_comm_file(name)
+    }
+
+    pub fn write_comm_file(&self, name: &str, contents: &str) -> io::Result<()> {
+        self.communication.write_comm_file(name, contents)
     }
 }
 
@@ -260,6 +271,7 @@ impl Default for Config {
                 to: "{wine_prefix}/drive_c/".into(),
             },
             detach_on_stop: true,
+            seek_amount: Duration::from_secs(5),
         }
             .resolve()
     }

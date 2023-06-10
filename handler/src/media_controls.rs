@@ -1,9 +1,9 @@
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, time::Duration};
 
 use log::*;
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error};
+use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error, SeekDirection, MediaPosition};
 
-use crate::{config::Config, filesystem};
+use crate::{config::Config, filesystem, communication::Action};
 
 pub struct Controls {
     controls: MediaControls,
@@ -87,7 +87,7 @@ impl Controls {
 }
 
 fn handle_event(event: MediaControlEvent, config: &Config) {
-    trace!("Recieved control event: {event:?}");
+    debug!("Recieved control event: {event:?}");
 
     use MediaControlEvent::*;
     match event {
@@ -95,6 +95,21 @@ fn handle_event(event: MediaControlEvent, config: &Config) {
         Next => config.run_command("/Next"),
         Previous => config.run_command("/Previous"),
         Stop => config.run_command("/Stop"),
+        OpenUri(uri) => config.run_command(&format!("/Play {uri}")),
+        Seek(direction) => directioned_duration_to_seek(direction, config.seek_amount).run(config),
+        SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration).run(config),
+        SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config),
         _ => { error!("Event {event:?} not implemented") } // TODO: implement other events
     }
+}
+
+fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) -> Action {
+    let duration = duration.as_millis() as i32;
+
+    let milis = match direction {
+        SeekDirection::Forward => duration,
+        SeekDirection::Backward => -duration,
+    };
+
+    Action::Seek { milis }
 }

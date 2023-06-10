@@ -1,6 +1,6 @@
-// #![allow(dead_code)]
-// #![allow(unused_variables)]
-// #![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
 // TODO: remove unwraps
 
 mod media_controls;
@@ -8,6 +8,7 @@ mod tray;
 mod filesystem;
 mod config;
 mod logger;
+mod communication;
 
 use std::sync::Arc;
 

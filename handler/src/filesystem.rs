@@ -7,8 +7,9 @@ use url::Url;
 
 use crate::{config::Config, media_controls::Controls};
 
-const METADATA_FILE: &str = "metadata";
-const PLAYBACK_FILE: &str = "playback";
+pub const METADATA_FILE: &str = "metadata";
+pub const PLAYBACK_FILE: &str = "playback";
+pub const ACTION_FILE: &str = "action";
 
 pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> RecommendedWatcher {
     let communication_directory = config.communication.directory.clone();
@@ -145,12 +146,11 @@ fn validate_cover(cover: &str, artist: &str, title: &str) -> Option<String> {
     // if the file exists then it's all good
     if path.exists() { return Some(cover.to_owned()); }
 
-    // sometimes musicbee messes up and forgets a capital for some unknowable reason
+    // since windows filenames don't care about capitalization,
+    // musicbee sometimes gives a file with the wrong capitalization
+    // this checks for it
     if let Some(capitalized) = change_cover_capitalization(path) {
-        info!("Got cover for track: {artist} - {title} at {cover}, but it was missing. Trying {} instead", capitalized.display());
-
         if capitalized.exists() {
-            info!("Cover with changed capitalization was found");
             return Some(capitalized.into_os_string().into_string().unwrap())
         }
     }

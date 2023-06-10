@@ -51,7 +51,7 @@ namespace MusicBeePlugin
             this.config = this.getConfig();
             this.panel = new ConfigPanel(this.config);
 
-            this.communication = new Communication(this.config, this.mbApiInterface);
+            this.communication = new Communication(this.config, this.mbApiInterface, this);
 
             this.CreateFileStructure();
 
@@ -97,8 +97,7 @@ namespace MusicBeePlugin
             {
                 case NotificationType.PluginStartup:
                     this.UpdateVolume();
-                    this.UpdatePlayback();
-                    this.UpdateMetaData();
+                    this.Update();
                     this.Activate();
                     break;
                 case NotificationType.TrackChanged:
@@ -152,6 +151,12 @@ namespace MusicBeePlugin
         private void Deactivate()
         {
             File.WriteAllText(this.config.rootDirectory + Communication.activatedFile, "false");
+        }
+
+        private void Update()
+        {
+            this.UpdatePlayback();
+            this.UpdateMetaData();
         }
 
         private void UpdatePlayback() 
@@ -221,10 +226,12 @@ namespace MusicBeePlugin
 
             private Config config;
             private MusicBeeApiInterface mbApiInterface;
+            private Plugin plugin;
 
-            public Communication(Config config, MusicBeeApiInterface mbApiInterface) {
+            public Communication(Config config, MusicBeeApiInterface mbApiInterface, Plugin plugin) {
                 this.config = config;
                 this.mbApiInterface = mbApiInterface;
+                this.plugin = plugin;
             }
 
             public void write(string file, string text) {
@@ -264,6 +271,7 @@ namespace MusicBeePlugin
                             break;
                         case "position":
                             this.setPosition(args[1]);
+                            this.plugin.Update();
                             break;
                         case "volume":
                             this.setVolume(args[1]);
