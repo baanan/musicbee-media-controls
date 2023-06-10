@@ -85,6 +85,7 @@ fn update_playback(controls: &mut Controls, config: &Config) {
             "stopped" => MediaPlayback::Stopped,
             "paused"  => MediaPlayback::Paused { progress },
             "playing" => MediaPlayback::Playing { progress },
+            "loading" => return,
             _ => {
                 error!("Playback value {} not found", playback.trim()); return;
             }

@@ -171,8 +171,11 @@ namespace MusicBeePlugin
                 case PlayState.Playing:
                     state = "playing";
                     break;
-                default:
+                case PlayState.Stopped:
                     state = "stopped";
+                    break;
+                default:
+                    state = "loading";
                     break;
             }
 
