@@ -20,6 +20,7 @@ Currently only building from source every time is supported, run `cargo run --re
   - [x] config
   - [ ] all media features
     - [x] playback times
+    - [x] seeking
     - [ ] all events (loop, shuffle)
       - [x] plugin
       - [ ] handler (issue with souvlaki)

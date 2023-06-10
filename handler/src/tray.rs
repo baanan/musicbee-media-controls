@@ -1,11 +1,15 @@
-use std::sync::{Mutex, Arc};
+use std::{sync::{Mutex, Arc}, io::Cursor};
 
-use tray_item::TrayItem;
+use gio::ResourceLookupFlags;
+use tray_item::{TrayItem, IconSource};
 
 use crate::{logger, config::Config, media_controls::Controls, filesystem};
 
 pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) {
-    let mut tray = TrayItem::new("MusicBee Media Controls", "accessories-calculator").unwrap();
+    let mut tray = TrayItem::new(
+        "MusicBee Media Controls",
+        IconSource::Resource("musicbee-linux-mediakeys-light")
+    ).unwrap();
 
     tray.add_label("MusicBee Media Controls").unwrap();
 

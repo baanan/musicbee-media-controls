@@ -2,6 +2,7 @@
 name = "handler"
 version = "0.1.0"
 edition = "2021"
+build="build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,7 +11,7 @@ edition = "2021"
 ## zbus is significantly faster for me
 souvlaki = { version = "0.6.0", default-features = false, features = ["use_zbus"] }
 notify = "5.1.0"
-tray-item = "0.7.1"
+tray-item = { version = "0.8.0", features = ["libappindicator"] }
 # utilities
 daemonize = "0.5.0"
 log = "0.4.0"
@@ -19,8 +20,14 @@ open = "3"
 url = "2.3.1"
 # dependencies
 gtk = "0.15"
+gio = "0.15"
+glib = "0.15"
 serde = "1.0.160"
 dirs = "5.0.0"
 ron = "0.8.0"
 aho-corasick = "1.0.1"
 lazy_static = "1.4.0"
+png = "0.16.8"
+
+[build-dependencies]
+dirs = "5.0.0"
