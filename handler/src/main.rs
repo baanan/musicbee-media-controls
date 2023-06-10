@@ -45,3 +45,7 @@ fn main() {
 
     // gtk has ended, cleanup
 }
+
+fn exit() {
+    gtk::main_quit();
+}

@@ -5,6 +5,8 @@ use tray_item::{TrayItem, IconSource};
 
 use crate::{logger, config::Config, media_controls::Controls, filesystem};
 
+// TODO: fancier tray (attach toggle, metadata)
+
 pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) {
     let mut tray = TrayItem::new(
         "MusicBee Media Controls",
@@ -43,6 +45,6 @@ pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) {
     }).unwrap();
     
     tray.add_menu_item("Quit", || {
-        gtk::main_quit();
+        crate::exit();
     }).unwrap();
 }

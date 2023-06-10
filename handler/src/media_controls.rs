@@ -8,7 +8,7 @@ use crate::{config::Config, filesystem, communication::Action};
 pub struct Controls {
     controls: MediaControls,
     config: Arc<Config>,
-    attached: bool,
+    pub attached: bool,
 }
 
 impl Controls {
@@ -29,10 +29,12 @@ impl Controls {
         }))
     }
 
-    /// Creates new media controls and attaches
+    /// Creates new media controls and attaches if the plugin is available
     pub fn init(config: Arc<Config>) -> Arc<Mutex<Self>> {
+        let plugin_available = filesystem::plugin_available(&config);
+
         let controls = Self::new(config);
-        controls.lock().unwrap().attach();
+        if plugin_available { controls.lock().unwrap().attach(); }
         controls
     }
 

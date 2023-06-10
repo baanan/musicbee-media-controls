@@ -36,6 +36,7 @@ fn replace(key: &str, config: &UnresolvedConfig) -> String {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(transparent)] // makes the reference act like a normal string when serialized
 pub struct UnresolvedReference {
     template: String,
 }
@@ -113,6 +114,7 @@ impl UnresolvedConfig {
             commands: self.commands.resolve(&cloned),
             communication: self.communication,
             detach_on_stop: self.detach_on_stop,
+            exit_with_plugin: self.exit_with_plugin,
             seek_amount: self.seek_amount,
         }
     }
@@ -223,6 +225,7 @@ pub struct ReferencedConfig<T> {
     pub music_file_mapper: Mapping<T>,
     pub temporary_file_mapper: Mapping<T>,
     pub detach_on_stop: bool,
+    pub exit_with_plugin: bool,
     pub seek_amount: Duration,
 }
 
@@ -271,6 +274,7 @@ impl Default for Config {
                 to: "{wine_prefix}/drive_c/".into(),
             },
             detach_on_stop: true,
+            exit_with_plugin: true,
             seek_amount: Duration::from_secs(5),
         }
             .resolve()
@@ -313,11 +317,8 @@ pub fn get_config() -> Config {
     // deserialize path
 
     if path.exists() {
-        let deserialized = deserialize(&fs::read_to_string(&path).unwrap());
-        if let Some(config) = deserialized {
-            return config;
-        }
-    } 
+        return deserialize(&fs::read_to_string(&path).unwrap());
+    }
 
     // fallback
 
@@ -330,14 +331,16 @@ pub fn get_config() -> Config {
     config
 }
 
-fn deserialize(string: &str) -> Option<Config> {
+fn deserialize(string: &str) -> Config {
     let config = ron::from_str::<Config>(string);
 
     match config {
-        Ok(config) => Some(config),
-        Err(err) => {
-            error!("failed to deserialize config, got {}", err);
-            None
-        },
+        Ok(config) => config,
+        // this would be great to log and recover, but the logger isn't initialized yet
+        // instead, panic with some instructions on what to do
+        Err(err) => panic!(
+            "\nFailed to deserialize config, error:\n    {}\nTo reset the config, delete {}",
+            err, config_path().to_str().unwrap_or("the config file")
+        ),
     }
 }

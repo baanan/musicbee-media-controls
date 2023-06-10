@@ -10,6 +10,7 @@ use crate::{config::Config, media_controls::Controls};
 pub const METADATA_FILE: &str = "metadata";
 pub const PLAYBACK_FILE: &str = "playback";
 pub const ACTION_FILE: &str = "action";
+pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
 
 pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> RecommendedWatcher {
     let communication_directory = config.communication.directory.clone();
@@ -48,10 +49,27 @@ fn handle_event(event: Result<Event>, controls: Arc<Mutex<Controls>>, config: &C
             match file_name {
                 METADATA_FILE => update_metadata(&mut controls.lock().unwrap(), config),
                 PLAYBACK_FILE => update_playback(&mut controls.lock().unwrap(), config),
+                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut controls.lock().unwrap(), config),
                 // TODO: plugin availablity watcher
                 _ => {},
             }
         }
+    }
+}
+
+pub fn plugin_available(config: &Config) -> bool {
+    config.read_comm_file(PLUGIN_ACTIVATED_FILE).unwrap().trim() == "true"
+}
+
+pub fn plugin_activation_changed(controls: &mut Controls, config: &Config) {
+    if !plugin_available(config) {
+        if config.exit_with_plugin {
+            glib::idle_add(|| { crate::exit(); glib::Continue(false) });
+        } else {
+            controls.detach();
+        }
+    } else if !controls.attached {
+        controls.attach();
     }
 }
 

@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::{fs::File, sync::{Arc, Mutex}};
 
 use env_logger::Target;
 use log::LevelFilter;
