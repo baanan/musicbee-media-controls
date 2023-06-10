@@ -15,7 +15,7 @@ impl Controls {
     /// Creates new, unattached media controls
     pub fn new(config: Arc<Config>) -> Arc<Mutex<Self>> {
         let platform = PlatformConfig {
-            dbus_name: "musicbee",
+            dbus_name: "com.github.baanan.musicbee_linux",
             display_name: "MusicBee",
             hwnd: None, // windows only
         };
