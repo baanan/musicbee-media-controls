@@ -2,7 +2,7 @@ use std::{path::PathBuf, fs, io, env, process::Command, fmt::{Display, Debug}, t
 
 use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
-use ron::ser::PrettyConfig;
+use ron::{ser::PrettyConfig, error::SpannedError};
 use serde::{Serialize, Deserialize};
 
 use log::*;
@@ -311,14 +311,22 @@ fn config_path() -> PathBuf {
     config_folder().join("config.ron")
 }
 
-pub fn get_config() -> Config {
+pub fn get_config() -> (Config, Option<SpannedError>) {
     let path = config_path();
 
     // deserialize path
 
-    if path.exists() {
-        return deserialize(&fs::read_to_string(&path).unwrap());
-    }
+    let err = 
+        if path.exists() {
+            let contents = &fs::read_to_string(&path).unwrap();
+            match ron::from_str::<Config>(contents) {
+                Ok(config) => return (config, None),
+                // return the error and use a default config since the logger isn't initialized yet
+                Err(err) => Some(err),
+            }
+        } else {
+            None
+        };
 
     // fallback
 
@@ -328,19 +336,5 @@ pub fn get_config() -> Config {
     fs::create_dir_all(config_folder()).unwrap();
     fs::write(path, serialized).unwrap();
 
-    config
-}
-
-fn deserialize(string: &str) -> Config {
-    let config = ron::from_str::<Config>(string);
-
-    match config {
-        Ok(config) => config,
-        // this would be great to log and recover, but the logger isn't initialized yet
-        // instead, panic with some instructions on what to do
-        Err(err) => panic!(
-            "\nFailed to deserialize config, error:\n    {}\nTo reset the config, delete {}",
-            err, config_path().to_str().unwrap_or("the config file")
-        ),
-    }
+    (config, err)
 }

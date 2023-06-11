@@ -15,6 +15,7 @@ use std::sync::Arc;
 // cargo is too dumb to realize that it's being used out of debug
 #[allow(unused_imports)]
 use daemonize::Daemonize;
+use log::error;
 use media_controls::Controls;
 
 fn main() {
@@ -23,12 +24,18 @@ fn main() {
     Daemonize::new()
         .start().expect("Failed to start daemon");
     
-    let config = Arc::new(config::get_config());
+    let (config, config_parse_error) = config::get_config();
+    let config = Arc::new(config);
 
     filesystem::create_file_structure(&config);
 
     // start logging to file
     logger::init(&config);
+
+    // if the config originally failed to parse, notify the user
+    if let Some(config_parse_error) = config_parse_error {
+        error!("failed to parse config, got: {config_parse_error}. Returned to defaults");
+    }
 
     // initialize gtk
     gtk::init().unwrap();
