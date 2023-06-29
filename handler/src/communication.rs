@@ -53,6 +53,6 @@ impl Action {
 
         // HACK: to notify the plugin that an action is ready,
         // the handler runs /VolumeDown
-        config.run_command("/VolumeDown");
+        config.run_command("/VolumeDown", None);
     }
 }

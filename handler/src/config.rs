@@ -174,13 +174,22 @@ pub struct Commands<T> {
 }
 
 impl Commands<ReferencedString> {
-    pub fn run_command(&self, command: &str) {
+    pub fn run_command(&self, command: &str, arg: Option<String>) {
         let mut cmd = Command::new(&self.wine_command);
          cmd.env("WINEPREFIX", self.wine_prefix.get())
             .arg(&self.musicbee_location)
             .arg(command);
 
-        trace!("Running command: \n    WINEPREFIX={} wine {} {}", self.wine_prefix, self.musicbee_location, command);
+        if let Some(ref arg) = arg {
+            cmd.arg(arg);
+        }
+
+        trace!("Running command: \n    WINEPREFIX={} wine {} {} {}",
+            self.wine_prefix,
+            self.musicbee_location,
+            command,
+            arg.unwrap_or("".to_string())
+        );
 
         let _ = cmd
             .spawn().unwrap()
@@ -242,8 +251,8 @@ impl Config {
         }
     }
 
-    pub fn run_command(&self, command: &str) {
-        self.commands.run_command(command)
+    pub fn run_command(&self, command: &str, arg: Option<String>) {
+        self.commands.run_command(command, arg)
     }
 
     pub fn get_comm_path(&self, name: &str) -> PathBuf {

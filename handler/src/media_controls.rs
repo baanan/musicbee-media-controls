@@ -1,7 +1,8 @@
-use std::{sync::{Arc, Mutex}, time::Duration};
+use std::{sync::{Arc, Mutex}, time::Duration, path::{PathBuf, Path}};
 
 use log::*;
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error, SeekDirection, MediaPosition};
+use url::Url;
 
 use crate::{config::Config, filesystem, communication::Action};
 
@@ -93,11 +94,11 @@ fn handle_event(event: MediaControlEvent, config: &Config) {
 
     use MediaControlEvent::*;
     match event {
-        Play | Pause | Toggle => config.run_command("/PlayPause"),
-        Next => config.run_command("/Next"),
-        Previous => config.run_command("/Previous"),
-        Stop => config.run_command("/Stop"),
-        OpenUri(uri) => config.run_command(&format!("/Play {uri}")),
+        Play | Pause | Toggle => config.run_command("/PlayPause", None),
+        Next => config.run_command("/Next", None),
+        Previous => config.run_command("/Previous", None),
+        Stop => config.run_command("/Stop", None),
+        OpenUri(uri) => config.run_command("/Play", Some(map_uri(uri))),
         Seek(direction) => directioned_duration_to_seek(direction, config.seek_amount).run(config),
         SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration).run(config),
         SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config),
@@ -114,4 +115,27 @@ fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) ->
     };
 
     Action::Seek { milis }
+}
+
+fn map_uri(uri: String) -> String {
+    let url = Url::parse(&uri);
+    match url {
+        Ok(url) if url.scheme() == "file" => map_file_uri(url),
+        Ok(url) => url.to_string(),
+        Err(_) => {
+            trace!("uri given was not a valid uri, defaulting to file");
+            uri
+        }
+    }
+}
+
+fn map_file_uri(uri: Url) -> String {
+    if let Ok(uri) = uri.to_file_path() {
+        if let Some(uri) = uri.to_str() {
+            return format!("Z:{uri}");
+        }
+    }
+
+    warn!("could not get path from file url");
+    uri.to_string()
 }
