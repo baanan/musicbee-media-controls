@@ -134,7 +134,7 @@ fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
 
 fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) -> Result<Action> {
     let duration: i32 = duration.as_millis().try_into()
-        .context("failed to convert the dutation into an i32")?;
+        .context("failed to convert the seek duration into an i32")?;
 
     let milis = match direction {
         SeekDirection::Forward => duration,

@@ -9,18 +9,29 @@ mod filesystem;
 mod config;
 mod logger;
 mod communication;
+mod cli;
 
 use std::sync::Arc;
 
+use clap::Parser;
+use cli::{Cli, Commands};
 use config::Config;
 // cargo is too dumb to realize that it's being used out of debug
 #[allow(unused_imports)]
 use daemonize::Daemonize;
+use directories::ProjectDirs;
 use log::*;
 use media_controls::Controls;
 
+#[must_use]
+fn project_dirs() -> Option<ProjectDirs> {
+    ProjectDirs::from("com.github", "baanan", "Musicbee Mediakeys")
+}
+
 fn main() {
-    let (config, config_err) = config::get_or_save_default();
+    let cli = Cli::parse();
+
+    let (config, config_err) = config::get_or_save_default(&cli.config_path);
 
     filesystem::create_file_structure(&config)
         .expect("failed to create the communication file structure");
@@ -32,14 +43,18 @@ fn main() {
         error!("failed to parse config, got: {config_err}. Returned to defaults");
     }
 
-    daemon(config);
+    match cli.command {
+        Commands::BecomeDaemon => daemon(config, &cli),
+        Commands::ConfigFile { open: false } => print!("{}", cli.config_file().display()),
+        Commands::ConfigFile { open: true } => open::that(cli.config_file()).expect("failed to open config file"),
+    }
 }
 
-fn daemon(config: Config) {
-    // detatch (doesn't detatch in debug for.. debugging)
-    #[cfg(not(debug_assertions))]
-    Daemonize::new()
-        .start().expect("failed to start daemon");
+fn daemon(config: Config, cli: &Cli) {
+    if cli.detach {
+        Daemonize::new()
+            .start().expect("failed to start daemon");
+    }
     
     // share config
     let config = Arc::new(config);

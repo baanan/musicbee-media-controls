@@ -1,4 +1,4 @@
-use std::{path::PathBuf, fs, io, env, process::Command, fmt::{Display, Debug}, time::Duration};
+use std::{path::{PathBuf, Path}, fs, io, env, process::Command, fmt::{Display, Debug}, time::Duration};
 
 use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
@@ -317,44 +317,35 @@ pub enum GetError {
     NotFound,
 }
 
-// FIX: use that other dirs crate
-fn config_folder() -> PathBuf {
-    dirs::config_dir().unwrap()
-        .join("musicbee-mediakeys")
-}
+pub const CONFIG_FILE: &str = "config.ron";
 
-fn config_path() -> PathBuf {
-    config_folder().join("config.ron")
-}
-
-pub fn get_or_save_default() -> (Config, Option<Error>) {
-    match get() {
+pub fn get_or_save_default(folder: &Path) -> (Config, Option<Error>) {
+    match get(folder) {
         Ok(config) => (config, None),
         Err(err) => (
-            save_default().unwrap_or_default(),
+            save_default(folder).unwrap_or_default(),
             // don't error if the config isn't found
             (!err.is::<GetError>()).then_some(err)
         )
     }
 }
 
-pub fn get() -> Result<Config> {
-    let path = config_path();
-    if !path.exists() { return Err(GetError::NotFound.into()); }
+pub fn get(folder: &Path) -> Result<Config> {
+    let file = folder.join(CONFIG_FILE);
+    if !file.exists() { return Err(GetError::NotFound.into()); }
 
-    let contents = &fs::read_to_string(&path).context("failed to read config")?;
+    let contents = &fs::read_to_string(&file).context("failed to read config")?;
     ron::from_str::<Config>(contents).context("failed to parse config")
 }
 
-pub fn save_default() -> Result<Config> {
-    let path = config_path();
-
+pub fn save_default(folder: &Path) -> Result<Config> {
+    let file = folder.join(CONFIG_FILE);
     let config = Config::default();
     let serialized = ron::ser::to_string_pretty(&config, PrettyConfig::new())
         .context("failed to serialize default config")?;
 
-    fs::create_dir_all(config_folder()).and_then(|()|
-        fs::write(path, serialized)
+    fs::create_dir_all(folder).and_then(|()|
+        fs::write(file, serialized)
     )
         .context("failed to save default config")?;
 
