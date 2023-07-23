@@ -11,10 +11,6 @@ pub struct Cli {
     #[arg(short, long, value_name = "FILE", default_value_os_t = default_config_path())]
     pub config_path: PathBuf,
 
-    /// Don't detach the daemon from the terminal when created
-    #[arg(short = 'd', long = "dont-detach", default_value_t = true, action = ArgAction::SetFalse)]
-    pub detach: bool,
-
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -39,8 +35,20 @@ fn default_config_path() -> PathBuf {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Become the dameon without checking if it already exists
-    BecomeDaemon,
+    /// Run the daemon
+    Run {
+        /// Force the daemon to start without checking if one already exists
+        #[arg(short, long)]
+        force: bool,
+        /// Don't detach the daemon from the terminal when created
+        #[arg(short = 'd', long = "dont-detach", default_value_t = true, action = ArgAction::SetFalse)]
+        detach: bool,
+        /// Don't create a tray item
+        #[arg(short = 't', long = "no-tray", default_value_t = true, action = ArgAction::SetFalse)]
+        tray: bool,
+    },
+    /// End the daemon
+    End,
     /// Print the current config file
     ConfigFile {
         /// Open the file with the default application instead of printing it
