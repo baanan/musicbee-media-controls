@@ -2,18 +2,18 @@ use std::{path::PathBuf, fs, io, env, process::Command, fmt::{Display, Debug}, t
 
 use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
-use ron::{ser::PrettyConfig, error::SpannedError};
+use ron::ser::PrettyConfig;
 use serde::{Serialize, Deserialize};
 use thiserror::Error;
+use anyhow::{Result, Context, Error};
 
-use log::trace;
-use souvlaki::SeekDirection;
+use log::*;
 
 // TODO: accept null for mappings 
 
 // HACK: make this better
 fn get_home_dir() -> String {
-    env::var("HOME").unwrap()
+    env::var("HOME").expect("$HOME has the home directory")
 }
 
 // HACK: make this better
@@ -176,7 +176,7 @@ pub struct Commands<T> {
 }
 
 impl Commands<ReferencedString> {
-    pub fn run_command(&self, command: &str, arg: Option<String>) {
+    pub fn run_command(&self, command: &str, arg: Option<String>) -> io::Result<()> {
         let mut cmd = Command::new(&self.wine_command);
          cmd.env("WINEPREFIX", self.wine_prefix.get())
             .arg(&self.musicbee_location)
@@ -193,11 +193,10 @@ impl Commands<ReferencedString> {
             arg.unwrap_or_default()
         );
 
-        let _ = cmd
-            .spawn().unwrap()
-            .wait().unwrap();
+        let _ = cmd.spawn()?.wait()?;
 
         trace!("Finished running command");
+        Ok(())
     }
 }
 
@@ -253,8 +252,8 @@ impl Config {
         }
     }
 
-    pub fn run_command(&self, command: &str, arg: Option<String>) {
-        self.commands.run_command(command, arg);
+    pub fn run_command(&self, command: &str, arg: Option<String>) -> io::Result<()> {
+        self.commands.run_command(command, arg)
     }
 
     pub fn get_comm_path(&self, name: &str) -> PathBuf {
@@ -312,18 +311,10 @@ impl Default for Communication {
 }
 
 
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error)]
 pub enum GetError {
     #[error("config file not found")]
     NotFound,
-    #[error("parse error found: {0}")]
-    ParseError(SpannedError),
-}
-
-impl From<SpannedError> for GetError {
-    fn from(v: SpannedError) -> Self {
-        Self::ParseError(v)
-    }
 }
 
 // FIX: use that other dirs crate
@@ -336,36 +327,36 @@ fn config_path() -> PathBuf {
     config_folder().join("config.ron")
 }
 
-pub fn get_or_save_default() -> (Config, Option<SpannedError>) {
+pub fn get_or_save_default() -> (Config, Option<Error>) {
     match get() {
         Ok(config) => (config, None),
         Err(err) => (
-            save_default(),
-            // only propagate SpannedError
-            if let GetError::ParseError(parse_error) = err 
-                { Some(parse_error) } else { None }
+            save_default().unwrap_or_default(),
+            // don't error if the config isn't found
+            (!err.is::<GetError>()).then_some(err)
         )
     }
 }
 
-pub fn get() -> Result<Config, GetError> {
+pub fn get() -> Result<Config> {
     let path = config_path();
-    if path.exists() {
-        let contents = &fs::read_to_string(&path).unwrap();
-        Ok(ron::from_str::<Config>(contents)?)
-    } else {
-        Err(GetError::NotFound)
-    }
+    if !path.exists() { return Err(GetError::NotFound.into()); }
+
+    let contents = &fs::read_to_string(&path).context("failed to read config")?;
+    ron::from_str::<Config>(contents).context("failed to parse config")
 }
 
-pub fn save_default() -> Config {
+pub fn save_default() -> Result<Config> {
     let path = config_path();
 
     let config = Config::default();
-    let serialized = ron::ser::to_string_pretty(&config, PrettyConfig::new()).unwrap();
+    let serialized = ron::ser::to_string_pretty(&config, PrettyConfig::new())
+        .context("failed to serialize default config")?;
 
-    fs::create_dir_all(config_folder()).unwrap();
-    fs::write(path, serialized).unwrap();
+    fs::create_dir_all(config_folder()).and_then(|()|
+        fs::write(path, serialized)
+    )
+        .context("failed to save default config")?;
 
-    config
+    Ok(config)
 }

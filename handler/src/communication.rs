@@ -1,9 +1,10 @@
-use std::{time::Duration, fmt::Display};
+use std::{time::Duration, fmt::Display, io};
 
-use log::{debug, trace};
+use log::*;
 
 use crate::{config::Config, filesystem::ACTION_FILE};
 
+#[allow(dead_code)]
 pub enum RepeatMode {
     None,
     All,
@@ -22,6 +23,7 @@ impl Display for RepeatMode {
     }
 }
 
+#[allow(dead_code)]
 pub enum Action {
     Shuffle(bool),
     Repeat(RepeatMode),
@@ -44,16 +46,17 @@ impl Display for Action {
 }
 
 impl Action {
-    pub fn run(&self, config: &Config) {
+    pub fn run(&self, config: &Config) -> io::Result<()> {
         let action = self.to_string();
         debug!("running action: {action}");
 
-        config.write_comm_file(ACTION_FILE, &action).unwrap();
+        config.write_comm_file(ACTION_FILE, &action)?;
 
         trace!("notifying musicbee (volume down)");
 
         // HACK: to notify the plugin that an action is ready,
         // the handler runs /VolumeDown
-        config.run_command("/VolumeDown", None);
+        config.run_command("/VolumeDown", None)?;
+        Ok(())
     }
 }

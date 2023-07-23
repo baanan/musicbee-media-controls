@@ -1,6 +1,6 @@
-use std::{sync::{Mutex, Arc}, io::Cursor};
+use std::sync::{Mutex, Arc};
 
-use gio::ResourceLookupFlags;
+use log::*;
 use tray_item::{TrayItem, IconSource, TIError};
 
 use crate::{logger, config::Config, media_controls::Controls, filesystem};
@@ -22,21 +22,24 @@ pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> Result<(),
     {
         let controls = controls.clone();
         tray.add_menu_item("Attach", move || {
-            controls.lock().unwrap().attach();
+            controls.lock().unwrap().attach()
+                .unwrap_or_else(|err| error!("failed to attach: {err}"));
         })?;
     }
 
     {
         let controls = controls.clone();
         tray.add_menu_item("Detach", move || {
-            controls.lock().unwrap().detach();
+            controls.lock().unwrap().detach()
+                .unwrap_or_else(|err| error!("failed to detach: {err}"));
         })?;
     }
 
     {
         let config = config.clone();
         tray.add_menu_item("Refresh", move || {
-            filesystem::update(&mut controls.lock().unwrap(), &config);
+            filesystem::update(&mut controls.lock().unwrap(), &config)
+                .unwrap_or_else(|err| error!("failed to refresh controls: {err}"));
         })?;
     }
 

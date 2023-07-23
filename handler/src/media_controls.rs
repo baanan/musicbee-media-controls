@@ -1,11 +1,31 @@
 #![allow(clippy::similar_names)]
-use std::{sync::{Arc, Mutex}, time::Duration, path::{PathBuf, Path}};
+use std::{sync::{Arc, Mutex}, time::Duration};
 
-use log::{debug, error, trace, warn};
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error, SeekDirection, MediaPosition};
+use anyhow::{Result, Context};
+use log::*;
+use souvlaki::*;
+use thiserror::Error;
 use url::Url;
 
 use crate::{config::Config, filesystem, communication::Action};
+
+#[derive(Debug, Error)]
+pub enum ControlsError {
+    #[error("tried to attach when already attached")]
+    AlreadyAttached,
+    #[error("tried to detach when already detached")]
+    AlreadyDetached,
+    #[error("system error: {0:?}")]
+    System(souvlaki::Error)
+}
+
+impl From<souvlaki::Error> for ControlsError {
+    fn from(v: souvlaki::Error) -> Self {
+        Self::System(v)
+    }
+}
+
+pub type ControlsResult<T> = Result<T, ControlsError>;
 
 pub struct Controls {
     controls: MediaControls,
@@ -15,110 +35,113 @@ pub struct Controls {
 
 impl Controls {
     /// Creates new, unattached media controls
-    pub fn new(config: Arc<Config>) -> Arc<Mutex<Self>> {
+    pub fn new(config: Arc<Config>) -> ControlsResult<Arc<Mutex<Self>>> {
         let platform = PlatformConfig {
             dbus_name: "com.github.baanan.musicbee_linux",
             display_name: "MusicBee",
             hwnd: None, // windows only
         };
 
-        let controls = MediaControls::new(platform)
-            .expect("to be able to create the media controls");
+        let controls = MediaControls::new(platform)?;
 
-        Arc::new(Mutex::new(Self {
+        Ok(Arc::new(Mutex::new(Self {
             controls,
             config,
             attached: false,
-        }))
+        })))
     }
 
     /// Creates new media controls and attaches if the plugin is available
-    pub fn init(config: Arc<Config>) -> Arc<Mutex<Self>> {
+    pub fn init(config: Arc<Config>) -> Result<Arc<Mutex<Self>>> {
         let plugin_available = filesystem::plugin_available(&config);
 
-        let controls = Self::new(config);
-        if plugin_available { controls.lock().unwrap().attach(); }
-        controls
+        let controls = Self::new(config)?;
+        if plugin_available? { controls.lock().unwrap().attach()?; }
+        Ok(controls)
     }
 
     /// Attaches media controls to a handler
-    pub fn attach(&mut self) {
+    pub fn attach(&mut self) -> Result<()> {
         if self.attached {
-            trace!("Tried to attach when already attached"); return;
+            return Err(ControlsError::AlreadyAttached)?;
         }
 
         trace!("Attaching");
 
         let config = self.config.clone();
 
-        self.controls
-            .attach(move |event| handle_event(event, &config))
-            .expect("to be able to attach the media controls");
+        self.controls.attach(move |event| 
+            handle_event(event, &config)
+                .unwrap_or_else(|err| error!("failed to handle event: {err}"))
+        ).map_err(ControlsError::from)?;
         self.attached = true;
 
-        filesystem::update(self, &self.config.clone());
+        filesystem::update(self, &self.config.clone())?;
+        Ok(())
     }
 
     /// Detatches the media controls from a handler
-    pub fn detach(&mut self) {
+    pub fn detach(&mut self) -> ControlsResult<()> {
         if !self.attached {
-            trace!("Tried to detach when not attached"); return;
+            return Err(ControlsError::AlreadyDetached);
         }
 
         trace!("Detaching");
-        self.controls.detach()
-            .expect("to be able to detach the media controls");
+        self.controls.detach()?;
         self.attached = false;
+
+        Ok(())
     }
 
     /// Delegate to set the metadata of the controls
-    pub fn set_metadata(&mut self, metadata: MediaMetadata) -> Result<(), Error> {
+    pub fn set_metadata(&mut self, metadata: MediaMetadata) -> ControlsResult<()> {
         if self.attached { self.controls.set_metadata(metadata)?; }
         Ok(())
     }
 
     /// Delegate to set the playback of the controls
-    pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<(), Error> {
+    pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<()> {
         if self.config.detach_on_stop { 
             match playback {
-                MediaPlayback::Stopped if self.attached => self.detach(),
-                MediaPlayback::Playing { .. } if !self.attached => self.attach(),
+                MediaPlayback::Stopped if self.attached => self.detach()?,
+                MediaPlayback::Playing { .. } if !self.attached => self.attach()?,
                 _ => {},
             }
         }
 
-        if self.attached { self.controls.set_playback(playback)?; }
+        if self.attached { self.controls.set_playback(playback).map_err(ControlsError::from)?; }
         Ok(())
     }
 }
 
-fn handle_event(event: MediaControlEvent, config: &Config) {
+fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
     #[allow(clippy::enum_glob_use)]
     use MediaControlEvent::*;
     debug!("Recieved control event: {event:?}");
     match event {
-        Play | Pause | Toggle => config.run_command("/PlayPause", None),
-        Next => config.run_command("/Next", None),
-        Previous => config.run_command("/Previous", None),
-        Stop => config.run_command("/Stop", None),
-        OpenUri(uri) => config.run_command("/Play", Some(map_uri(uri))),
-        Seek(direction) => directioned_duration_to_seek(direction, config.seek_amount).run(config),
-        SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration).run(config),
-        SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config),
+        Play | Pause | Toggle => config.run_command("/PlayPause", None)?,
+        Next => config.run_command("/Next", None)?,
+        Previous => config.run_command("/Previous", None)?,
+        Stop => config.run_command("/Stop", None)?,
+        OpenUri(uri) => config.run_command("/Play", Some(map_uri(uri)))?,
+        Seek(direction) => directioned_duration_to_seek(direction, config.seek_amount)?.run(config)?,
+        SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration)?.run(config)?,
+        SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config)?,
         _ => { error!("Event {event:?} not implemented") } // TODO: implement other events
     }
+    Ok(())
 }
 
-fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) -> Action {
+fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) -> Result<Action> {
     let duration: i32 = duration.as_millis().try_into()
-        .expect("the duration to fit inside an i32");
+        .context("failed to convert the dutation into an i32")?;
 
     let milis = match direction {
         SeekDirection::Forward => duration,
         SeekDirection::Backward => -duration,
     };
 
-    Action::Seek { milis }
+    Ok(Action::Seek { milis })
 }
 
 fn map_uri(uri: String) -> String {

@@ -32,6 +32,7 @@ lazy_static = "1.4.0"
 png = "0.16.8"
 thiserror = "1.0.44"
 clap = { version = "4.3.19", features = ["derive"] }
+anyhow = "1.0.72"
 
 [build-dependencies]
 dirs = "5.0.0"
