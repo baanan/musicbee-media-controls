@@ -1,19 +1,19 @@
 use std::{sync::{Mutex, Arc}, io::Cursor};
 
 use gio::ResourceLookupFlags;
-use tray_item::{TrayItem, IconSource};
+use tray_item::{TrayItem, IconSource, TIError};
 
 use crate::{logger, config::Config, media_controls::Controls, filesystem};
 
 // TODO: fancier tray (attach toggle, metadata)
 
-pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) {
+pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> Result<(), TIError> {
     let mut tray = TrayItem::new(
         "MusicBee Media Controls",
         IconSource::Resource("musicbee-linux-mediakeys-light")
-    ).unwrap();
+    )?;
 
-    tray.add_label("MusicBee Media Controls").unwrap();
+    tray.add_label("MusicBee Media Controls")?;
 
     // i wish i could add separators here
     // and also mutate the label names
@@ -23,28 +23,30 @@ pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) {
         let controls = controls.clone();
         tray.add_menu_item("Attach", move || {
             controls.lock().unwrap().attach();
-        }).unwrap();
+        })?;
     }
 
     {
         let controls = controls.clone();
         tray.add_menu_item("Detach", move || {
             controls.lock().unwrap().detach();
-        }).unwrap();
+        })?;
     }
 
     {
         let config = config.clone();
         tray.add_menu_item("Refresh", move || {
             filesystem::update(&mut controls.lock().unwrap(), &config);
-        }).unwrap();
+        })?;
     }
 
     tray.add_menu_item("Show Logs", move || {
         logger::open(&config);
-    }).unwrap();
+    })?;
     
     tray.add_menu_item("Quit", || {
         crate::exit();
-    }).unwrap();
+    })?;
+
+    Ok(())
 }

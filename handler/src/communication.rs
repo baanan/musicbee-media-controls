@@ -13,9 +13,9 @@ pub enum RepeatMode {
 impl Display for RepeatMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string = match self {
-            RepeatMode::None => "none",
-            RepeatMode::All => "all",
-            RepeatMode::One => "one",
+            Self::None => "none",
+            Self::All => "all",
+            Self::One => "one",
         };
 
         write!(f, "{string}")
@@ -33,11 +33,12 @@ pub enum Action {
 impl Display for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Action::Shuffle(val) => write!(f, "shuffle {val}"),
-            Action::Repeat(val) => write!(f, "repeat {val}"),
-            Action::Seek { milis } => write!(f, "seek {}", milis),
-            Action::Position(val) => write!(f, "position {}", val.as_millis()),
-            Action::Volume(val) => write!(f, "volume {}", (val * 100.0) as i32),
+            Self::Shuffle(val) => write!(f, "shuffle {val}"),
+            Self::Repeat(val) => write!(f, "repeat {val}"),
+            Self::Seek { milis } => write!(f, "seek {milis}"),
+            Self::Position(val) => write!(f, "position {}", val.as_millis()),
+            #[allow(clippy::cast_possible_truncation)]
+            Self::Volume(val) => write!(f, "volume {}", (val * 100.0) as i32),
         }
     }
 }

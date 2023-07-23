@@ -3,6 +3,8 @@ name = "handler"
 version = "0.1.0"
 edition = "2021"
 build="build.rs"
+description="The linux-side dameon for Musicbee Linux Mediakeys"
+authors=["baanan"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,6 +31,7 @@ aho-corasick = "1.0.1"
 lazy_static = "1.4.0"
 png = "0.16.8"
 thiserror = "1.0.44"
+clap = { version = "4.3.19", features = ["derive"] }
 
 [build-dependencies]
 dirs = "5.0.0"

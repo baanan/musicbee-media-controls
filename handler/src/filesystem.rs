@@ -1,8 +1,8 @@
 use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::{Arc, Mutex}};
 
-use log::*;
+use log::{debug, error, warn};
 use souvlaki::{MediaPlayback, MediaMetadata, MediaPosition};
-use notify::{Watcher, RecursiveMode, Result, event::*, RecommendedWatcher};
+use notify::{Watcher, RecursiveMode, Result, event::{Event, EventKind, ModifyKind}, RecommendedWatcher};
 use url::Url;
 
 use crate::{config::Config, media_controls::Controls};
@@ -12,12 +12,12 @@ pub const PLAYBACK_FILE: &str = "playback";
 pub const ACTION_FILE: &str = "action";
 pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
 
-pub fn watch_filesystem(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> RecommendedWatcher {
+pub fn watch(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> RecommendedWatcher {
     let communication_directory = config.communication.directory.clone();
 
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
-        handle_event(event, controls.clone(), &config)
+        handle_event(event, &controls, &config);
     }).unwrap();
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)
         .unwrap();
@@ -36,7 +36,7 @@ pub fn create_file_structure(config: &Config) {
         .open(config.get_comm_path(PLAYBACK_FILE)).unwrap();
 }
 
-fn handle_event(event: Result<Event>, controls: Arc<Mutex<Controls>>, config: &Config) {
+fn handle_event(event: Result<Event>, controls: &Arc<Mutex<Controls>>, config: &Config) {
     let Ok(event) = event else { return };
 
     if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
@@ -138,7 +138,7 @@ fn update_metadata(controls: &mut Controls, config: &Config) {
             })
             .unwrap();
     } else {
-        warn!("Got malformed metadata from file, found:\n{metadata}")
+        warn!("Got malformed metadata from file, found:\n{metadata}");
     }
 }
 

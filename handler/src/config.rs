@@ -6,7 +6,7 @@ use ron::{ser::PrettyConfig, error::SpannedError};
 use serde::{Serialize, Deserialize};
 use thiserror::Error;
 
-use log::*;
+use log::trace;
 use souvlaki::SeekDirection;
 
 // TODO: accept null for mappings 
@@ -66,7 +66,7 @@ impl UnresolvedReference {
 
 impl From<&str> for UnresolvedReference {
     fn from(template: &str) -> Self {
-        UnresolvedReference { template: template.to_owned() }
+        Self { template: template.to_owned() }
     }
 }
 
@@ -166,6 +166,7 @@ impl Mapping<ReferencedString> {
 }
 
 
+#[allow(clippy::doc_markdown)]
 /// Info for running commands on MusicBee
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Commands<T> {
@@ -189,14 +190,14 @@ impl Commands<ReferencedString> {
             self.wine_prefix,
             self.musicbee_location,
             command,
-            arg.unwrap_or("".to_string())
+            arg.unwrap_or_default()
         );
 
         let _ = cmd
             .spawn().unwrap()
             .wait().unwrap();
 
-        trace!("Finished running command")
+        trace!("Finished running command");
     }
 }
 
@@ -224,12 +225,12 @@ impl Communication {
 
 // TODO: wrap in another type to make sure it gets resolved
 
-pub type Config = ReferencedConfig<ReferencedString>;
-type UnresolvedConfig = ReferencedConfig<UnresolvedReference>;
+pub type Config = Referenced<ReferencedString>;
+type UnresolvedConfig = Referenced<UnresolvedReference>;
 
 /// Global Config for the application
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct ReferencedConfig<T> {
+pub struct Referenced<T> {
     pub commands: Commands<T>,
     pub communication: Communication,
     pub music_file_mapper: Mapping<T>,
@@ -253,7 +254,7 @@ impl Config {
     }
 
     pub fn run_command(&self, command: &str, arg: Option<String>) {
-        self.commands.run_command(command, arg)
+        self.commands.run_command(command, arg);
     }
 
     pub fn get_comm_path(&self, name: &str) -> PathBuf {
@@ -312,19 +313,18 @@ impl Default for Communication {
 
 
 #[derive(Debug, Error, Clone)]
-pub enum ConfigGetError {
+pub enum GetError {
     #[error("config file not found")]
     NotFound,
     #[error("parse error found: {0}")]
     ParseError(SpannedError),
 }
 
-impl From<SpannedError> for ConfigGetError {
+impl From<SpannedError> for GetError {
     fn from(v: SpannedError) -> Self {
         Self::ParseError(v)
     }
 }
-
 
 // FIX: use that other dirs crate
 fn config_folder() -> PathBuf {
@@ -336,29 +336,29 @@ fn config_path() -> PathBuf {
     config_folder().join("config.ron")
 }
 
-pub fn get_config_or_save_default() -> (Config, Option<SpannedError>) {
-    match get_config() {
+pub fn get_or_save_default() -> (Config, Option<SpannedError>) {
+    match get() {
         Ok(config) => (config, None),
         Err(err) => (
-            save_default_config(),
+            save_default(),
             // only propagate SpannedError
-            if let ConfigGetError::ParseError(parse_error) = err 
+            if let GetError::ParseError(parse_error) = err 
                 { Some(parse_error) } else { None }
         )
     }
 }
 
-pub fn get_config() -> Result<Config, ConfigGetError> {
+pub fn get() -> Result<Config, GetError> {
     let path = config_path();
     if path.exists() {
         let contents = &fs::read_to_string(&path).unwrap();
         Ok(ron::from_str::<Config>(contents)?)
     } else {
-        Err(ConfigGetError::NotFound)
+        Err(GetError::NotFound)
     }
 }
 
-pub fn save_default_config() -> Config {
+pub fn save_default() -> Config {
     let path = config_path();
 
     let config = Config::default();

@@ -1,6 +1,7 @@
+#![allow(clippy::similar_names)]
 use std::{sync::{Arc, Mutex}, time::Duration, path::{PathBuf, Path}};
 
-use log::*;
+use log::{debug, error, trace, warn};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, PlatformConfig, MediaPlayback, Error, SeekDirection, MediaPosition};
 use url::Url;
 
@@ -21,7 +22,8 @@ impl Controls {
             hwnd: None, // windows only
         };
 
-        let controls = MediaControls::new(platform).unwrap();
+        let controls = MediaControls::new(platform)
+            .expect("to be able to create the media controls");
 
         Arc::new(Mutex::new(Self {
             controls,
@@ -41,31 +43,32 @@ impl Controls {
 
     /// Attaches media controls to a handler
     pub fn attach(&mut self) {
-        if !self.attached {
-            trace!("Attaching");
-
-            let config = self.config.clone();
-
-            self.controls
-                .attach(move |event| handle_event(event, &config))
-                .unwrap();
-            self.attached = true;
-
-            filesystem::update(self, &self.config.clone())
-        } else {
-            trace!("Tried to attach when already attached")
+        if self.attached {
+            trace!("Tried to attach when already attached"); return;
         }
+
+        trace!("Attaching");
+
+        let config = self.config.clone();
+
+        self.controls
+            .attach(move |event| handle_event(event, &config))
+            .expect("to be able to attach the media controls");
+        self.attached = true;
+
+        filesystem::update(self, &self.config.clone());
     }
 
     /// Detatches the media controls from a handler
     pub fn detach(&mut self) {
-        if self.attached {
-            trace!("Detaching");
-            self.controls.detach().unwrap();
-            self.attached = false;
-        } else {
-            trace!("Tried to detach when not attached")
+        if !self.attached {
+            trace!("Tried to detach when not attached"); return;
         }
+
+        trace!("Detaching");
+        self.controls.detach()
+            .expect("to be able to detach the media controls");
+        self.attached = false;
     }
 
     /// Delegate to set the metadata of the controls
@@ -90,9 +93,9 @@ impl Controls {
 }
 
 fn handle_event(event: MediaControlEvent, config: &Config) {
-    debug!("Recieved control event: {event:?}");
-
+    #[allow(clippy::enum_glob_use)]
     use MediaControlEvent::*;
+    debug!("Recieved control event: {event:?}");
     match event {
         Play | Pause | Toggle => config.run_command("/PlayPause", None),
         Next => config.run_command("/Next", None),
@@ -107,7 +110,8 @@ fn handle_event(event: MediaControlEvent, config: &Config) {
 }
 
 fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) -> Action {
-    let duration = duration.as_millis() as i32;
+    let duration: i32 = duration.as_millis().try_into()
+        .expect("the duration to fit inside an i32");
 
     let milis = match direction {
         SeekDirection::Forward => duration,
@@ -120,7 +124,7 @@ fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) ->
 fn map_uri(uri: String) -> String {
     let url = Url::parse(&uri);
     match url {
-        Ok(url) if url.scheme() == "file" => map_file_uri(url),
+        Ok(url) if url.scheme() == "file" => map_file_uri(&url),
         Ok(url) => url.to_string(),
         Err(_) => {
             trace!("uri given was not a valid uri, defaulting to file");
@@ -129,7 +133,7 @@ fn map_uri(uri: String) -> String {
     }
 }
 
-fn map_file_uri(uri: Url) -> String {
+fn map_file_uri(uri: &Url) -> String {
     if let Ok(uri) = uri.to_file_path() {
         if let Some(uri) = uri.to_str() {
             return format!("Z:{uri}");

@@ -12,7 +12,7 @@ mod communication;
 
 use std::sync::Arc;
 
-use config::ConfigGetError;
+use config::{GetError, Config};
 // cargo is too dumb to realize that it's being used out of debug
 #[allow(unused_imports)]
 use daemonize::Daemonize;
@@ -20,13 +20,7 @@ use log::error;
 use media_controls::Controls;
 
 fn main() {
-    // detatch (doesn't detatch in debug for debugging)
-    #[cfg(not(debug_assertions))]
-    Daemonize::new()
-        .start().expect("Failed to start daemon");
-    
-    let (config, config_err) = config::get_config_or_save_default();
-    let config = Arc::new(config);
+    let (config, config_err) = config::get_or_save_default();
 
     filesystem::create_file_structure(&config);
 
@@ -34,19 +28,30 @@ fn main() {
     logger::init(&config);
 
     // if the config originally failed to parse, notify the user
-    if let Some(config_parse_error) = config_err {
-        error!("failed to parse config, got: {config_parse_error}. Returned to defaults");
+    if let Some(config_err) = config_err {
+        error!("failed to parse config, got: {config_err}. Returned to defaults");
     }
+
+    daemon(config);
+}
+
+fn daemon(config: Config) {
+    // detatch (doesn't detatch in debug for.. debugging)
+    #[cfg(not(debug_assertions))]
+    Daemonize::new()
+        .start().expect("Failed to start daemon");
+    
+    let config = Arc::new(config);
 
     // initialize gtk
     gtk::init().unwrap();
 
     // attach to media controls
     let controls = Controls::init(config.clone());
-    let _watcher = filesystem::watch_filesystem(controls.clone(), config.clone());
+    let _watcher = filesystem::watch(controls.clone(), config.clone());
 
     // start system tray
-    tray::create(controls, config);
+    tray::create(controls, config).expect("to be able to create the system tray");
 
     // start gtk event loop
     gtk::main();
