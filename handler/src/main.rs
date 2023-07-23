@@ -12,6 +12,7 @@ mod communication;
 
 use std::sync::Arc;
 
+use config::ConfigGetError;
 // cargo is too dumb to realize that it's being used out of debug
 #[allow(unused_imports)]
 use daemonize::Daemonize;
@@ -24,7 +25,7 @@ fn main() {
     Daemonize::new()
         .start().expect("Failed to start daemon");
     
-    let (config, config_parse_error) = config::get_config();
+    let (config, config_err) = config::get_config_or_save_default();
     let config = Arc::new(config);
 
     filesystem::create_file_structure(&config);
@@ -33,7 +34,7 @@ fn main() {
     logger::init(&config);
 
     // if the config originally failed to parse, notify the user
-    if let Some(config_parse_error) = config_parse_error {
+    if let Some(config_parse_error) = config_err {
         error!("failed to parse config, got: {config_parse_error}. Returned to defaults");
     }
 

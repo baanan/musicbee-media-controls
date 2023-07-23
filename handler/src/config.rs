@@ -4,6 +4,7 @@ use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
 use ron::{ser::PrettyConfig, error::SpannedError};
 use serde::{Serialize, Deserialize};
+use thiserror::Error;
 
 use log::*;
 use souvlaki::SeekDirection;
@@ -310,6 +311,21 @@ impl Default for Communication {
 }
 
 
+#[derive(Debug, Error, Clone)]
+pub enum ConfigGetError {
+    #[error("config file not found")]
+    NotFound,
+    #[error("parse error found: {0}")]
+    ParseError(SpannedError),
+}
+
+impl From<SpannedError> for ConfigGetError {
+    fn from(v: SpannedError) -> Self {
+        Self::ParseError(v)
+    }
+}
+
+
 // FIX: use that other dirs crate
 fn config_folder() -> PathBuf {
     dirs::config_dir().unwrap()
@@ -320,24 +336,30 @@ fn config_path() -> PathBuf {
     config_folder().join("config.ron")
 }
 
-pub fn get_config() -> (Config, Option<SpannedError>) {
+pub fn get_config_or_save_default() -> (Config, Option<SpannedError>) {
+    match get_config() {
+        Ok(config) => (config, None),
+        Err(err) => (
+            save_default_config(),
+            // only propagate SpannedError
+            if let ConfigGetError::ParseError(parse_error) = err 
+                { Some(parse_error) } else { None }
+        )
+    }
+}
+
+pub fn get_config() -> Result<Config, ConfigGetError> {
     let path = config_path();
+    if path.exists() {
+        let contents = &fs::read_to_string(&path).unwrap();
+        Ok(ron::from_str::<Config>(contents)?)
+    } else {
+        Err(ConfigGetError::NotFound)
+    }
+}
 
-    // deserialize path
-
-    let err = 
-        if path.exists() {
-            let contents = &fs::read_to_string(&path).unwrap();
-            match ron::from_str::<Config>(contents) {
-                Ok(config) => return (config, None),
-                // return the error and use a default config since the logger isn't initialized yet
-                Err(err) => Some(err),
-            }
-        } else {
-            None
-        };
-
-    // fallback
+pub fn save_default_config() -> Config {
+    let path = config_path();
 
     let config = Config::default();
     let serialized = ron::ser::to_string_pretty(&config, PrettyConfig::new()).unwrap();
@@ -345,5 +367,5 @@ pub fn get_config() -> (Config, Option<SpannedError>) {
     fs::create_dir_all(config_folder()).unwrap();
     fs::write(path, serialized).unwrap();
 
-    (config, err)
+    config
 }
