@@ -53,10 +53,11 @@ impl Controls {
 
     /// Creates new media controls and attaches if the plugin is available
     pub fn init(config: Arc<Config>) -> Result<Arc<Mutex<Self>>> {
-        let plugin_available = filesystem::plugin_available(&config);
+        let plugin_available = filesystem::plugin_available(&config)?;
+        let plugin_available = plugin_available.is_some_and(|f| f);
 
         let controls = Self::new(config)?;
-        if plugin_available? { controls.lock().unwrap().attach()?; }
+        if plugin_available { controls.lock().unwrap().attach()?; }
         Ok(controls)
     }
 

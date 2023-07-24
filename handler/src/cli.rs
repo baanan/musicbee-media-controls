@@ -41,7 +41,7 @@ pub enum Commands {
         #[arg(short, long)]
         force: bool,
         /// Don't detach the daemon from the terminal when created
-        #[arg(short = 'd', long = "dont-detach", default_value_t = true, action = ArgAction::SetFalse)]
+        #[arg(short = 'd', long = "no-detach", default_value_t = true, action = ArgAction::SetFalse)]
         detach: bool,
         /// Don't create a tray item
         #[arg(short = 't', long = "no-tray", default_value_t = true, action = ArgAction::SetFalse)]

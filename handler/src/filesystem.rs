@@ -70,14 +70,18 @@ pub enum Error {
     MalformedMetadata(String),
 }
 
-pub fn plugin_available(config: &Config) -> Result<bool> {
-    let text = config.read_comm_file(PLUGIN_ACTIVATED_FILE)?;
-    Ok(text.trim() == "true")
+pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
+    let text = config.read_comm_file(PLUGIN_ACTIVATED_FILE)
+        .context("failed to read")?;
+
+    // empty files are normal when they're being created
+    if text.is_empty() { return Ok(None); }
+
+    Ok(Some(text.parse().context("failed to parse")?))
 }
 
 pub fn plugin_activation_changed(controls: &mut Controls, config: &Config) -> Result<()> {
-    let available = plugin_available(config)
-        .context("failed to read the plugin availability file")?;
+    let Some(available) = plugin_available(config)? else { return Ok(()); };
 
     match (available, controls.attached) {
         // exit if specified
