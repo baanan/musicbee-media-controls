@@ -13,6 +13,7 @@ pub const METADATA_FILE: &str = "metadata";
 pub const PLAYBACK_FILE: &str = "playback";
 pub const ACTION_FILE: &str = "action";
 pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
+pub const VOLUME_FILE: &str = "volume";
 
 pub fn watch(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> notify::Result<RecommendedWatcher> {
     let communication_directory = config.communication.directory.clone();
@@ -35,6 +36,9 @@ pub fn create_file_structure(config: &Config) -> io::Result<()> {
     OpenOptions::new()
         .write(true).create(true).truncate(false)
         .open(config.get_comm_path(PLAYBACK_FILE))?;
+    OpenOptions::new()
+        .write(true).create(true).truncate(false)
+        .open(config.get_comm_path(VOLUME_FILE))?;
     Ok(())
 }
 
@@ -53,6 +57,8 @@ fn handle_event(event: notify::Result<Event>, controls: &Arc<Mutex<Controls>>, c
                     .unwrap_or_else(|err| error!("failed to handle change in metadata: {err}")),
                 PLAYBACK_FILE => update_playback(&mut controls.lock().unwrap(), config)
                     .unwrap_or_else(|err| error!("failed to handle change in playback: {err}")),
+                VOLUME_FILE => update_volume(&mut controls.lock().unwrap(), config)
+                    .unwrap_or_else(|err| error!("failed to handle change in volume: {err}")),
                 PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut controls.lock().unwrap(), config)
                     .unwrap_or_else(|err| error!("failed to handle change in plugin activation: {err}")),
                 // TODO: plugin availablity watcher
@@ -63,11 +69,13 @@ fn handle_event(event: notify::Result<Event>, controls: &Arc<Mutex<Controls>>, c
 }
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum MalformedFile {
     #[error("playback value '{0}' not found")]
-    MalformedPlayback(String),
+    Playback(String),
     #[error("got malformed metadata: '{0}'")]
-    MalformedMetadata(String),
+    Metadata(String),
+    #[error("got malformed volume: '{0}'")]
+    Volume(String),
 }
 
 pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
@@ -99,6 +107,7 @@ pub fn plugin_activation_changed(controls: &mut Controls, config: &Config) -> Re
 pub fn update(controls: &mut Controls, config: &Config) -> Result<()> {
     update_metadata(controls, config)?;
     update_playback(controls, config)?;
+    update_volume(controls, config)?;
     Ok(())
 }
 
@@ -128,14 +137,14 @@ fn update_playback(controls: &mut Controls, config: &Config) -> Result<()> {
             "playing" => MediaPlayback::Playing { progress },
             "loading" => return Ok(()),
             _ => {
-                return Err(Error::MalformedPlayback(playback.trim().to_owned()))?;
+                return Err(MalformedFile::Playback(playback.trim().to_owned()))?;
             }
         };
 
         controls.set_playback(playback)
             .context("failed to set the player's playback")?;
     } else {
-        return Err(Error::MalformedPlayback(playback.trim().to_owned()))?;
+        return Err(MalformedFile::Playback(playback.trim().to_owned()))?;
     }
     Ok(())
 }
@@ -168,8 +177,26 @@ fn update_metadata(controls: &mut Controls, config: &Config) -> Result<()> {
             .context("failed to set the player's metadata")?;
         Ok(())
     } else {
-        Err(Error::MalformedMetadata(metadata))?
+        Err(MalformedFile::Metadata(metadata))?
     }
+}
+
+fn update_volume(controls: &mut Controls, config: &Config) -> Result<()> {
+    let volume = config.read_comm_file(VOLUME_FILE)
+        .context("failed to read the volume file")?;
+
+    // empty files are normal when they're being created
+    if volume.is_empty() { return Ok(()); }
+
+    let volume: f64 = volume.trim().parse()
+        .map_err(|_| MalformedFile::Volume(volume))?;
+
+    debug!("updating volume: {volume}");
+
+    controls.set_volume(volume)
+        .context("failed to set the player's volume")?;
+
+    Ok(())
 }
 
 fn map_cover(

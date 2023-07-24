@@ -28,6 +28,7 @@ namespace MusicBeePlugin
         private ConfigPanel panel;
 
         private float volume = 1;
+        public bool ignoreNextVolumeUpdate = false;
 
         public PluginInfo Initialise(IntPtr apiInterfacePtr)
         {
@@ -97,7 +98,8 @@ namespace MusicBeePlugin
             {
                 case NotificationType.PluginStartup:
                     this.UpdateVolume();
-                    this.Update();
+                    this.UpdatePlayback();
+                    this.UpdateMetaData();
                     this.Activate();
                     break;
                 case NotificationType.TrackChanged:
@@ -110,29 +112,68 @@ namespace MusicBeePlugin
                     break;
                 case NotificationType.VolumeLevelChanged:
 
-                    // HACK: the handler communicates to plugin by changing volume.
-                    // If a file in the communication directory has a new action, 
-                    //   then it'll perform that action and reset the volume.
-                    // If it doesn't, then it'll do nothing (which is very 
-                    //   important to not start an infinite loop)
-                    // Find something better if possible.
-                    this.RecieveCommand();
+                    if(this.ignoreNextVolumeUpdate) {
+                        this.ignoreNextVolumeUpdate = false;
+                    } else {
+                        // HACK: the handler communicates to plugin by changing volume.
+                        // If a file in the communication directory has a new action, 
+                        //   then it'll perform that action and reset the volume.
+                        // If it doesn't, then it'll do nothing (which is very 
+                        //   important to not start an infinite loop)
+                        // Find something better if possible.
+                        this.RecieveCommand();
+                    }
 
                     break;
             }
         }
 
+        public enum VolumeUpdate
+        {
+            // reset the playback volume to the stored value then update the controls
+            SendFromStored,
+            // update the internal value as well as the controls
+            SendFromPlayer,
+            // update the internal value but not the controls
+            PlayerFromStored,
+        }
+
         private void RecieveCommand()
         {
-            if (this.communication.handleAction()) {
-                this.ResetVolume();
-            } else {
-                this.UpdateVolume();
+            switch(this.communication.handleAction()) {
+                case VolumeUpdate.SendFromStored:
+                    this.ResetVolume();
+                    this.SendVolume();
+                    return;
+                case VolumeUpdate.SendFromPlayer:
+                    this.UpdateVolume();
+                    return;
+                case VolumeUpdate.PlayerFromStored:
+                    this.ResetVolume();
+                    return;
             }
         }
 
-        private void UpdateVolume() { this.volume = mbApiInterface.Player_GetVolume(); }
-        private void ResetVolume() { mbApiInterface.Player_SetVolume(this.volume); }
+        private float GetPlayerVolume() 
+            { return mbApiInterface.Player_GetVolume(); }
+
+        private void ResetVolume() 
+        {
+            this.ignoreNextVolumeUpdate = true;
+            if(Math.Abs(this.GetPlayerVolume() - this.volume) > 0.01)
+                mbApiInterface.Player_SetVolume(this.volume);
+        }
+
+        private void UpdateVolume() 
+        {
+            this.UpdateInternalVolume();
+            this.SendVolume();
+        }
+
+        private void UpdateInternalVolume() 
+            { this.volume = this.GetPlayerVolume(); }
+        private void SendVolume() 
+            { this.communication.write(Communication.volumeFile, "" + this.volume); }
 
         private void CreateFileStructure()
         {
@@ -141,6 +182,7 @@ namespace MusicBeePlugin
             File.Create(this.config.rootDirectory + Communication.playbackFile).Close();
             File.Create(this.config.rootDirectory + Communication.metadataFile).Close();
             File.Create(this.config.rootDirectory + Communication.actionFile).Close();
+            File.Create(this.config.rootDirectory + Communication.volumeFile).Close();
         }
 
         private void Activate()
@@ -151,12 +193,6 @@ namespace MusicBeePlugin
         private void Deactivate()
         {
             File.WriteAllText(this.config.rootDirectory + Communication.activatedFile, "false");
-        }
-
-        private void Update()
-        {
-            this.UpdatePlayback();
-            this.UpdateMetaData();
         }
 
         private void UpdatePlayback() 
@@ -226,6 +262,7 @@ namespace MusicBeePlugin
             public const string playbackFile = "playback";
             public const string activatedFile = "plugin-activated";
             public const string actionFile = "action";
+            public const string volumeFile = "volume";
 
             private Config config;
             private MusicBeeApiInterface mbApiInterface;
@@ -246,17 +283,25 @@ namespace MusicBeePlugin
             }
 
             // returns if an action was handled
-            public bool handleAction() {
+            public VolumeUpdate handleAction() {
                 string action = get(Communication.actionFile);
-                if(string.IsNullOrWhiteSpace(action)) return false;
+                if(string.IsNullOrWhiteSpace(action)) 
+                    return VolumeUpdate.SendFromPlayer;
 
                 string[] args = action.Trim().Split();
 
                 // no-arg commands
-                if(args[0] == "play")
-                    mbApiInterface.Player_PlayPause();
+                switch(args[0]) {
+                    case "play":
+                        mbApiInterface.Player_PlayPause();
+                        break;
+                    case "request_volume":
+                        this.plugin.UpdateInternalVolume();
+                        this.plugin.SendVolume();
+                        break;
+                }
 
-                bool volumeChanged = false;
+                VolumeUpdate volumeUpdate = VolumeUpdate.PlayerFromStored;
 
                 // single argument commands
                 // TODO: some kind of logging
@@ -274,17 +319,17 @@ namespace MusicBeePlugin
                             break;
                         case "position":
                             this.setPosition(args[1]);
-                            this.plugin.Update();
+                            this.plugin.UpdatePlayback();
                             break;
                         case "volume":
                             this.setVolume(args[1]);
-                            volumeChanged = true;
+                            volumeUpdate = VolumeUpdate.SendFromStored;
                             break;
                     }
                 }
 
                 write(Communication.actionFile, "");
-                return !volumeChanged;
+                return volumeUpdate;
             }
 
             private void updateShuffle(string arg) 
@@ -303,7 +348,7 @@ namespace MusicBeePlugin
                         return;
                 }
             }
-            
+
             private void updateRepeat(string arg)
             {
                 switch (arg)
@@ -345,7 +390,8 @@ namespace MusicBeePlugin
             private void setVolume(string str)
             {
                 parseIntAnd(str, to => {
-                    mbApiInterface.Player_SetVolume((float) to / 100);
+                    float vol = (float) to / 100;
+                    this.plugin.volume = vol;
                 });
             }
         }

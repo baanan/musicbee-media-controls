@@ -198,6 +198,10 @@ impl Commands<ReferencedString> {
         trace!("Finished running command");
         Ok(())
     }
+
+    pub fn run_simple_command(&self, command: &str) -> io::Result<()> {
+        self.run_command(command, None)
+    }
 }
 
 
@@ -254,6 +258,10 @@ impl Config {
 
     pub fn run_command(&self, command: &str, arg: Option<String>) -> io::Result<()> {
         self.commands.run_command(command, arg)
+    }
+
+    pub fn run_simple_command(&self, command: &str) -> io::Result<()> {
+        self.commands.run_simple_command(command)
     }
 
     pub fn get_comm_path(&self, name: &str) -> PathBuf {

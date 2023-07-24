@@ -30,6 +30,7 @@ pub type ControlsResult<T> = Result<T, ControlsError>;
 pub struct Controls {
     controls: MediaControls,
     config: Arc<Config>,
+    volume: f64,
     pub attached: bool,
 }
 
@@ -48,6 +49,7 @@ impl Controls {
             controls,
             config,
             attached: false,
+            volume: 0.0,
         })))
     }
 
@@ -70,7 +72,6 @@ impl Controls {
         trace!("Attaching");
 
         let config = self.config.clone();
-
         self.controls.attach(move |event| 
             handle_event(event, &config)
                 .unwrap_or_else(|err| error!("failed to handle event: {err}"))
@@ -100,6 +101,17 @@ impl Controls {
         Ok(())
     }
 
+    /// Delegate to set the volume of the controls
+    pub fn set_volume(&mut self, volume: f64) -> ControlsResult<()> {
+        self.controls.set_volume(volume)?;
+        Ok(())
+    }
+
+    /// Determines whether the input `volume` is different than the current volume
+    pub fn volume_is_new(&self, volume: f64) -> bool {
+        (volume - self.volume).abs() > 0.01
+    }
+
     /// Delegate to set the playback of the controls
     pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<()> {
         if self.config.detach_on_stop { 
@@ -120,14 +132,17 @@ fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
     use MediaControlEvent::*;
     debug!("Recieved control event: {event:?}");
     match event {
-        Play | Pause | Toggle => config.run_command("/PlayPause", None)?,
-        Next => config.run_command("/Next", None)?,
-        Previous => config.run_command("/Previous", None)?,
-        Stop => config.run_command("/Stop", None)?,
+        Play | Pause | Toggle => config.run_simple_command("/PlayPause")?,
+        Next => config.run_simple_command("/Next")?,
+        Previous => config.run_simple_command("/Previous")?,
+        Stop => config.run_simple_command("/Stop")?,
         OpenUri(uri) => config.run_command("/Play", Some(map_uri(uri)))?,
-        Seek(direction) => directioned_duration_to_seek(direction, config.seek_amount)?.run(config)?,
-        SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration)?.run(config)?,
+        Seek(direction) => directioned_duration_to_seek(direction, config.seek_amount)?
+            .run(config)?,
+        SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration)?
+            .run(config)?,
         SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config)?,
+        SetVolume(vol) => Action::Volume(vol).run(config)?,
         _ => { error!("Event {event:?} not implemented") } // TODO: implement other events
     }
     Ok(())

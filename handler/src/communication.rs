@@ -29,7 +29,7 @@ pub enum Action {
     Repeat(RepeatMode),
     Seek { milis: i32 },
     Position(Duration),
-    Volume(f32),
+    Volume(f64),
 }
 
 impl Display for Action {
