@@ -12,6 +12,7 @@ authors=["baanan"]
 # most important parts
 ## zbus is significantly faster for me
 souvlaki = { git = "https://github.com/Sinono3/souvlaki", branch = "volume", default-features = false, features = ["use_zbus"] }
+# souvlaki = { path = "../../souvlaki", default-features = false, features = ["use_zbus"] }
 notify = "5.1.0"
 tray-item = { version = "0.8.0", features = ["libappindicator"] }
 # utilities

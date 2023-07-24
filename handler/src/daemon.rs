@@ -30,7 +30,7 @@ pub fn remove_pid(config: &Config) -> Result<()> {
 pub fn run(config: Config, detach: bool, tray: bool) -> Result<()> {
     let pid = get_pid(&config)?;
     if pid.is_none() {
-        create(config, detach, tray);
+        create(config, detach, tray)?;
     }
     Ok(())
 }
@@ -47,8 +47,17 @@ pub fn end(config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub fn create(config: Config, detach: bool, tray: bool) {
+pub fn init_pid_dir(config: &Config) -> Result<()> {
+    fs::create_dir_all(
+        pid_file(config).parent()
+            .expect("pid file must be in a directory")
+    )?;
+    Ok(())
+}
+
+pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     if detach {
+        init_pid_dir(&config)?;
         Daemonize::new()
             .pid_file(pid_file(&config))
             .start().expect("failed to start daemon");
@@ -84,5 +93,6 @@ pub fn create(config: Config, detach: bool, tray: bool) {
     // removing the pid is also done by self::end
     remove_pid(&config)
         .expect("failed to remove the pid");
+    Ok(())
 }
 

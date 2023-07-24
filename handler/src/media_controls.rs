@@ -30,7 +30,6 @@ pub type ControlsResult<T> = Result<T, ControlsError>;
 pub struct Controls {
     controls: MediaControls,
     config: Arc<Config>,
-    volume: f64,
     pub attached: bool,
 }
 
@@ -49,7 +48,6 @@ impl Controls {
             controls,
             config,
             attached: false,
-            volume: 0.0,
         })))
     }
 
@@ -105,11 +103,6 @@ impl Controls {
     pub fn set_volume(&mut self, volume: f64) -> ControlsResult<()> {
         self.controls.set_volume(volume)?;
         Ok(())
-    }
-
-    /// Determines whether the input `volume` is different than the current volume
-    pub fn volume_is_new(&self, volume: f64) -> bool {
-        (volume - self.volume).abs() > 0.01
     }
 
     /// Delegate to set the playback of the controls

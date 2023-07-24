@@ -44,7 +44,7 @@ fn main() {
         Commands::Run { force: false, detach, tray } => 
             daemon::run(config, detach, tray).expect("failed to start daemon"),
         Commands::Run { force: true, detach, tray } => 
-            daemon::create(config, detach, tray),
+            daemon::create(config, detach, tray).expect("failed to forcibly run daemon"),
         Commands::End => 
             daemon::end(&config).expect("failed to end daemon"),
         Commands::ConfigFile { open: false } => 
