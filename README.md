@@ -1,4 +1,4 @@
-# MusicBee Media Controls
+# MusicBee Linux Media Controls
 
 Media controls for Musicbee with Linux
 
@@ -14,11 +14,11 @@ In `handler`, run `cargo install --path .`
 
 ## Use
 
-Most of the usage comes with the `musicbee_mediakeys` command which can start or end the daemon. Run `musicbee_mediakeys run` to start the daemon. 
+Most of the usage comes with the `musicbee_media_controls` command which can start or end the daemon. Run `musicbee_media_controls run` to start the daemon. 
 
 ## Config
 
-Generic configuration can be found with `musicbee_mediakeys config-file --open`. The most important configuration to change is `commands.musicbee_location` to send commands to MusicBee.
+Generic configuration can be found with `musicbee_media_controls config-file --open`. The most important configuration to change is `commands.musicbee_location` to send commands to MusicBee.
 
 ```ron
 (

@@ -1,9 +1,9 @@
 [package]
-name = "musicbee_mediakeys"
+name = "musicbee_media_controls"
 version = "0.1.0"
 edition = "2021"
 build="build.rs"
-description="The linux-side dameon for Musicbee Linux Mediakeys"
+description="The linux-side dameon for Musicbee Linux Media Controls"
 authors=["baanan"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
