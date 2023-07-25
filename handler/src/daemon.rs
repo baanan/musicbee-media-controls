@@ -35,17 +35,16 @@ pub fn run(config: Config, detach: bool, tray: bool) -> Result<()> {
 }
 
 pub fn end(config: &Config) -> Result<()> {
-    let pid = get_pid(config)?;
-    if let Some(pid) = pid {
-        // WARN: this might not work for everything
-        Command::new("kill")
-            .arg(pid.to_string())
-            .spawn()?;
+    let Some(pid) = get_pid(config)? else {
+        bail!("no pid found, the daemon might not be running");
+    };
 
-        remove_pid(config)
-    } else {
-        bail!("no pid found, the daemon might not be running")
-    }
+    // WARN: this might not work for everything
+    Command::new("kill")
+        .arg(pid.to_string())
+        .spawn()?;
+
+    remove_pid(config)
 }
 
 pub fn init_pid_dir(config: &Config) -> Result<()> {

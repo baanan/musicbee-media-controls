@@ -6,11 +6,11 @@ Media controls for Musicbee with Linux
 
 ### Plugin
 
-Copy over `plugin/mb_LinuxMediaControls.dll` over to your MusicBee plugin folder
+Copy `plugin/mb_LinuxMediaControls.dll` over to your MusicBee plugin folder
 
 ### Handler
 
-Move to `handler`, and run `cargo install --path .`
+In `handler`, run `cargo install --path .`
 
 ## TODO:
 
