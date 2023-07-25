@@ -1,7 +1,7 @@
 use std::{path::{PathBuf, Path}, sync::Arc, fs, process::Command};
 
 use daemonize::Daemonize;
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, bail};
 
 use crate::{config::Config, media_controls::Controls, filesystem, tray};
 
@@ -28,11 +28,10 @@ pub fn remove_pid(config: &Config) -> Result<()> {
 }
 
 pub fn run(config: Config, detach: bool, tray: bool) -> Result<()> {
-    let pid = get_pid(&config)?;
-    if pid.is_none() {
-        create(config, detach, tray)?;
+    if let Some(pid) = get_pid(&config)? {
+        bail!("deamon is already running with pid {pid}, use --force to ignore")
     }
-    Ok(())
+    create(config, detach, tray)
 }
 
 pub fn end(config: &Config) -> Result<()> {
@@ -42,9 +41,11 @@ pub fn end(config: &Config) -> Result<()> {
         Command::new("kill")
             .arg(pid.to_string())
             .spawn()?;
-        remove_pid(config)?;
+
+        remove_pid(config)
+    } else {
+        bail!("no pid found, the daemon might not be running")
     }
-    Ok(())
 }
 
 pub fn init_pid_dir(config: &Config) -> Result<()> {
@@ -60,7 +61,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
         init_pid_dir(&config)?;
         Daemonize::new()
             .pid_file(pid_file(&config))
-            .start().expect("failed to start daemon");
+            .start().context("failed to start daemon")?;
     }
 
     // share config
@@ -68,9 +69,9 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
 
     // attach to media controls
     let controls = Controls::init(config.clone())
-        .expect("failed to initialize the media controls");
+        .context("failed to initialize the media controls")?;
     let _watcher = filesystem::watch(controls.clone(), config.clone())
-        .expect("failed to start to watch the filesystem");
+        .context("failed to start to watch the filesystem")?;
 
     if tray {
         // initialize gtk
@@ -78,7 +79,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
 
         // start system tray
         tray::create(controls, config.clone())
-            .expect("failed to start system tray");
+            .context("failed to start system tray")?;
 
         // start gtk event loop
         gtk::main();
@@ -92,7 +93,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // NOTE: this isn't run if the process was killed
     // removing the pid is also done by self::end
     remove_pid(&config)
-        .expect("failed to remove the pid");
+        .context("failed to remove the pid")?;
     Ok(())
 }
 

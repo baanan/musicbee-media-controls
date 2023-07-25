@@ -19,21 +19,22 @@ use cli::{Cli, Commands};
 use daemonize::Daemonize;
 use directories::ProjectDirs;
 use log::*;
+use anyhow::*;
 
 #[must_use]
 fn project_dirs() -> Option<ProjectDirs> {
     ProjectDirs::from("com.github", "baanan", "Musicbee Mediakeys")
 }
 
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let (config, config_err) = config::get_or_save_default(&cli.config_path);
 
     filesystem::create_file_structure(&config)
-        .expect("failed to create the communication file structure");
+        .context("failed to create the communication file structure")?;
     logger::init(&config)
-        .expect("failed to start logging");
+        .context("failed to start logging")?;
 
     // if the config originally failed to parse, notify the user
     if let Some(config_err) = config_err {
@@ -42,16 +43,18 @@ fn main() {
 
     match cli.command {
         Commands::Run { force: false, detach, tray } => 
-            daemon::run(config, detach, tray).expect("failed to start daemon"),
+            daemon::run(config, detach, tray).context("failed to start daemon")?,
         Commands::Run { force: true, detach, tray } => 
-            daemon::create(config, detach, tray).expect("failed to forcibly run daemon"),
+            daemon::create(config, detach, tray).context("failed to forcibly run daemon")?,
         Commands::End => 
-            daemon::end(&config).expect("failed to end daemon"),
+            daemon::end(&config).context("failed to end daemon")?,
         Commands::ConfigFile { open: false } => 
             print!("{}", cli.config_file().display()),
         Commands::ConfigFile { open: true } => 
-            open::that(cli.config_file()).expect("failed to open config file"),
+            open::that(cli.config_file()).context("failed to open config file")?,
     }
+
+    Ok(())
 }
 
 fn exit() {
