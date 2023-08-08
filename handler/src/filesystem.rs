@@ -61,7 +61,6 @@ fn handle_event(event: notify::Result<Event>, controls: &Arc<Mutex<Controls>>, c
                     .unwrap_or_else(|err| error!("failed to handle change in volume: {err}")),
                 PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut controls.lock().unwrap(), config)
                     .unwrap_or_else(|err| error!("failed to handle change in plugin activation: {err}")),
-                // TODO: plugin availablity watcher
                 _ => {},
             }
         }
@@ -80,12 +79,12 @@ pub enum MalformedFile {
 
 pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
     let text = config.read_comm_file(PLUGIN_ACTIVATED_FILE)
-        .context("failed to read")?;
+        .context("failed to read plugin availability")?;
 
     // empty files are normal when they're being created
     if text.is_empty() { return Ok(None); }
 
-    Ok(Some(text.parse().context("failed to parse")?))
+    Ok(Some(text.parse().context("failed to parse plugin availability")?))
 }
 
 pub fn plugin_activation_changed(controls: &mut Controls, config: &Config) -> Result<()> {

@@ -34,9 +34,12 @@ pub fn run(config: Config, detach: bool, tray: bool) -> Result<()> {
     create(config, detach, tray)
 }
 
-pub fn end(config: &Config) -> Result<()> {
+pub fn end(config: &Config, force: bool) -> Result<()> {
     let Some(pid) = get_pid(config)? else {
-        bail!("no pid found, the daemon might not be running");
+        if force {
+            bail!("no pid found, the daemon might not be running");
+        }
+        return Ok(());
     };
 
     // WARN: this might not work for everything

@@ -4,10 +4,12 @@ use clap::{Parser, Subcommand, ArgAction};
 
 use crate::config;
 
+// TODO: run --replace or simply just replace
+
 #[derive(Parser)]
 #[command(author, version, about)]
 pub struct Cli {
-    /// Sets a custom config file
+    /// Sets a custom config path
     #[arg(short, long, value_name = "FILE", default_value_os_t = default_config_path())]
     pub config_path: PathBuf,
 
@@ -46,6 +48,9 @@ pub enum Commands {
         /// Don't create a tray item
         #[arg(short = 't', long = "no-tray", default_value_t = true, action = ArgAction::SetFalse)]
         tray: bool,
+        /// Don't automatically replace any current daemon if it exists
+        #[arg(short = 'r', long = "no-replace", default_value_t = true, action = ArgAction::SetFalse)]
+        replace: bool,
     },
     /// End the daemon
     End,

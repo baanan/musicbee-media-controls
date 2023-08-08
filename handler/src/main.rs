@@ -14,6 +14,7 @@ mod daemon;
 
 use clap::Parser;
 use cli::{Cli, Commands};
+use config::Config;
 // cargo is too dumb to realize that it's being used out of debug
 #[allow(unused_imports)]
 use daemonize::Daemonize;
@@ -42,16 +43,31 @@ fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Run { force: false, detach, tray } => 
-            daemon::run(config, detach, tray).context("failed to start daemon")?,
-        Commands::Run { force: true, detach, tray } => 
-            daemon::create(config, detach, tray).context("failed to forcibly run daemon")?,
+        Commands::Run { .. } => run(config, &cli.command)?,
         Commands::End => 
-            daemon::end(&config).context("failed to end daemon")?,
+            daemon::end(&config, true).context("failed to end daemon")?,
         Commands::ConfigFile { open: false } => 
             print!("{}", cli.config_file().display()),
         Commands::ConfigFile { open: true } => 
             open::that(cli.config_file()).context("failed to open config file")?,
+    }
+
+    Ok(())
+}
+
+fn run(config: Config, command: &Commands) -> Result<()> {
+    let Commands::Run { force, detach, tray, replace } = command else {
+        panic!("expected command to be a Commands::Run");
+    };
+
+    if *replace { 
+        daemon::end(&config, false).context("failed to replace previous daemon")?; 
+    }
+
+    if *force {
+        daemon::create(config, *detach, *tray).context("failed to forcibly start daemon")?;
+    } else {
+        daemon::run(config, *detach, *tray).context("failed to start daemon")?;
     }
 
     Ok(())
