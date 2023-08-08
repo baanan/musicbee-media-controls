@@ -16,6 +16,10 @@ In `handler`, run `cargo install --path .`
 
 Most of the usage comes with the `musicbee_media_controls` command which can start or end the daemon. Run `musicbee_media_controls run` to start the daemon. 
 
+## Known Issues
+
+- The handler freaks out when changing volume while using [Aylur's Widgets](https://extensions.gnome.org/extension/5338/aylurs-widgets/), use `send_volume: false` to stop this.
+
 ## Config
 
 Generic configuration can be found with `musicbee_media_controls config-file --open`. The most important configuration to change is `commands.musicbee_location` to send commands to MusicBee.
@@ -52,6 +56,8 @@ Generic configuration can be found with `musicbee_media_controls config-file --o
         secs: 5,
         nanos: 0,
     ),
+    // should the media controls allow externally setting the volume
+    send_volume: true,
 )
 ```
 
