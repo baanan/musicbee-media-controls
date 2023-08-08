@@ -1,5 +1,5 @@
 #![allow(clippy::similar_names)]
-use std::{sync::{Arc, Mutex}, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{Result, Context};
 use log::*;
@@ -8,6 +8,8 @@ use thiserror::Error;
 use url::Url;
 
 use crate::{config::Config, filesystem, communication::Action};
+
+use super::Listener;
 
 #[derive(Debug, Error)]
 pub enum ControlsError {
@@ -30,12 +32,12 @@ pub type ControlsResult<T> = Result<T, ControlsError>;
 pub struct Controls {
     controls: MediaControls,
     config: Arc<Config>,
-    pub attached: bool,
+    attached: bool,
 }
 
 impl Controls {
     /// Creates new, unattached media controls
-    pub fn new(config: Arc<Config>) -> ControlsResult<Arc<Mutex<Self>>> {
+    pub fn new(config: Arc<Config>) -> ControlsResult<Self> {
         let platform = PlatformConfig {
             dbus_name: "com.github.baanan.musicbee_linux",
             display_name: "MusicBee",
@@ -44,25 +46,27 @@ impl Controls {
 
         let controls = MediaControls::new(platform)?;
 
-        Ok(Arc::new(Mutex::new(Self {
+        Ok(Self {
             controls,
             config,
             attached: false,
-        })))
+        })
     }
 
     /// Creates new media controls and attaches if the plugin is available
-    pub fn init(config: Arc<Config>) -> Result<Arc<Mutex<Self>>> {
+    pub fn init(config: Arc<Config>) -> Result<Self> {
         let plugin_available = filesystem::plugin_available(&config)?;
-        let plugin_available = plugin_available.is_some_and(|f| f);
+        let plugin_available = plugin_available.unwrap_or_default();
 
-        let controls = Self::new(config)?;
-        if plugin_available { controls.lock().unwrap().attach()?; }
+        let mut controls = Self::new(config)?;
+        if plugin_available { controls.attach()?; }
         Ok(controls)
     }
+}
 
+impl Listener for Controls {
     /// Attaches media controls to a handler
-    pub fn attach(&mut self) -> Result<()> {
+    fn attach(&mut self) -> Result<()> {
         if self.attached {
             return Err(ControlsError::AlreadyAttached)?;
         }
@@ -81,32 +85,34 @@ impl Controls {
     }
 
     /// Detatches the media controls from a handler
-    pub fn detach(&mut self) -> ControlsResult<()> {
+    fn detach(&mut self) -> Result<()> {
         if !self.attached {
-            return Err(ControlsError::AlreadyDetached);
+            return Err(ControlsError::AlreadyDetached)?;
         }
 
         trace!("Detaching");
-        self.controls.detach()?;
+        self.controls.detach().map_err(ControlsError::from)?;
         self.attached = false;
 
         Ok(())
     }
 
     /// Delegate to set the metadata of the controls
-    pub fn set_metadata(&mut self, metadata: MediaMetadata) -> ControlsResult<()> {
-        if self.attached { self.controls.set_metadata(metadata)?; }
+    fn set_metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+        if self.attached { 
+            self.controls.set_metadata(metadata.clone()).map_err(ControlsError::from)?; 
+        }
         Ok(())
     }
 
     /// Delegate to set the volume of the controls
-    pub fn set_volume(&mut self, volume: f64) -> ControlsResult<()> {
-        self.controls.set_volume(volume)?;
+    fn set_volume(&mut self, volume: f64) -> Result<()> {
+        self.controls.set_volume(volume).map_err(ControlsError::from)?;
         Ok(())
     }
 
     /// Delegate to set the playback of the controls
-    pub fn set_playback(&mut self, playback: MediaPlayback) -> Result<()> {
+    fn set_playback(&mut self, playback: &MediaPlayback) -> Result<()> {
         if self.config.detach_on_stop { 
             match playback {
                 MediaPlayback::Stopped if self.attached => self.detach()?,
@@ -115,9 +121,13 @@ impl Controls {
             }
         }
 
-        if self.attached { self.controls.set_playback(playback).map_err(ControlsError::from)?; }
+        if self.attached { 
+            self.controls.set_playback(playback.clone()).map_err(ControlsError::from)?; 
+        }
         Ok(())
     }
+
+    fn attached(&self) -> bool { self.attached }
 }
 
 fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {

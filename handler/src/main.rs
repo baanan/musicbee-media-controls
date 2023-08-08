@@ -3,7 +3,6 @@
 // #![allow(unused_imports)]
 #![allow(clippy::wildcard_imports)]
 
-mod media_controls;
 mod tray;
 mod filesystem;
 mod config;
@@ -11,6 +10,7 @@ mod logger;
 mod communication;
 mod cli;
 mod daemon;
+mod listener;
 
 use clap::Parser;
 use cli::{Cli, Commands};

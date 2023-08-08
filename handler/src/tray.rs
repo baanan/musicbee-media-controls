@@ -3,11 +3,11 @@ use std::sync::{Mutex, Arc};
 use log::*;
 use tray_item::{TrayItem, IconSource, TIError};
 
-use crate::{logger, config::Config, media_controls::Controls, filesystem};
+use crate::{logger, config::Config, listener::{Listener, self}, filesystem};
 
 // TODO: fancier tray (attach toggle, metadata)
 
-pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> Result<(), TIError> {
+pub fn create(listeners: Arc<Mutex<listener::List>>, config: Arc<Config>) -> Result<(), TIError> {
     let mut tray = TrayItem::new(
         "MusicBee Media Controls",
         IconSource::Resource("musicbee-linux-mediakeys-light")
@@ -20,17 +20,17 @@ pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> Result<(),
     // TODO: make the tray look nicer
     
     {
-        let controls = controls.clone();
+        let listeners = listeners.clone();
         tray.add_menu_item("Attach", move || {
-            controls.lock().unwrap().attach()
+            listeners.lock().unwrap().attach()
                 .unwrap_or_else(|err| error!("failed to attach: {err}"));
         })?;
     }
 
     {
-        let controls = controls.clone();
+        let listeners = listeners.clone();
         tray.add_menu_item("Detach", move || {
-            controls.lock().unwrap().detach()
+            listeners.lock().unwrap().detach()
                 .unwrap_or_else(|err| error!("failed to detach: {err}"));
         })?;
     }
@@ -38,7 +38,7 @@ pub fn create(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> Result<(),
     {
         let config = config.clone();
         tray.add_menu_item("Refresh", move || {
-            filesystem::update(&mut controls.lock().unwrap(), &config)
+            filesystem::update(&mut *listeners.lock().unwrap(), &config)
                 .unwrap_or_else(|err| error!("failed to refresh controls: {err}"));
         })?;
     }

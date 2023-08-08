@@ -3,7 +3,7 @@ use std::{path::{PathBuf, Path}, sync::Arc, fs, process::Command};
 use daemonize::Daemonize;
 use anyhow::{Result, Context, bail};
 
-use crate::{config::Config, media_controls::Controls, filesystem, tray};
+use crate::{config::Config, listener::{media_controls::Controls, self}, filesystem, tray};
 
 pub fn pid_file(config: &Config) -> PathBuf {
     crate::project_dirs().and_then(|directories| directories.runtime_dir().map(Path::to_owned))
@@ -72,7 +72,11 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // attach to media controls
     let controls = Controls::init(config.clone())
         .context("failed to initialize the media controls")?;
-    let _watcher = filesystem::watch(controls.clone(), config.clone())
+
+    let listeners = listener::List::new()
+        .add(controls)
+        .wrap_shared();
+    let _watcher = filesystem::watch(listeners.clone(), config.clone())
         .context("failed to start to watch the filesystem")?;
 
     if tray {
@@ -80,7 +84,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
         gtk::init().unwrap();
 
         // start system tray
-        tray::create(controls, config.clone())
+        tray::create(listeners, config.clone())
             .context("failed to start system tray")?;
 
         // start gtk event loop

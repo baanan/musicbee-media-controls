@@ -7,7 +7,7 @@ use notify::{Watcher, RecursiveMode, event::{Event, EventKind, ModifyKind}, Reco
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, media_controls::Controls};
+use crate::{config::Config, listener::Listener};
 
 pub const METADATA_FILE: &str = "metadata";
 pub const PLAYBACK_FILE: &str = "playback";
@@ -15,12 +15,12 @@ pub const ACTION_FILE: &str = "action";
 pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
 pub const VOLUME_FILE: &str = "volume";
 
-pub fn watch(controls: Arc<Mutex<Controls>>, config: Arc<Config>) -> notify::Result<RecommendedWatcher> {
+pub fn watch(listener: Arc<Mutex<impl Listener + Send + 'static>>, config: Arc<Config>) -> notify::Result<RecommendedWatcher> {
     let communication_directory = config.communication.directory.clone();
 
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
-        handle_event(event, &controls, &config);
+        handle_event(event, &listener, &config);
     })?;
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)?;
 
@@ -42,7 +42,7 @@ pub fn create_file_structure(config: &Config) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_event(event: notify::Result<Event>, controls: &Arc<Mutex<Controls>>, config: &Config) {
+fn handle_event(event: notify::Result<Event>, listener: &Arc<Mutex<impl Listener>>, config: &Config) {
     let Ok(event) = event else { return };
 
     if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
@@ -53,13 +53,13 @@ fn handle_event(event: notify::Result<Event>, controls: &Arc<Mutex<Controls>>, c
 
         for file_name in file_names {
             match file_name {
-                METADATA_FILE => update_metadata(&mut controls.lock().unwrap(), config)
+                METADATA_FILE => update_metadata(&mut *listener.lock().unwrap(), config)
                     .unwrap_or_else(|err| error!("failed to handle change in metadata: {err}")),
-                PLAYBACK_FILE => update_playback(&mut controls.lock().unwrap(), config)
+                PLAYBACK_FILE => update_playback(&mut *listener.lock().unwrap(), config)
                     .unwrap_or_else(|err| error!("failed to handle change in playback: {err}")),
-                VOLUME_FILE => update_volume(&mut controls.lock().unwrap(), config)
+                VOLUME_FILE => update_volume(&mut *listener.lock().unwrap(), config)
                     .unwrap_or_else(|err| error!("failed to handle change in volume: {err}")),
-                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut controls.lock().unwrap(), config)
+                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut *listener.lock().unwrap(), config)
                     .unwrap_or_else(|err| error!("failed to handle change in plugin activation: {err}")),
                 _ => {},
             }
@@ -87,30 +87,30 @@ pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
     Ok(Some(text.parse().context("failed to parse plugin availability")?))
 }
 
-pub fn plugin_activation_changed(controls: &mut Controls, config: &Config) -> Result<()> {
+pub fn plugin_activation_changed(listener: &mut impl Listener, config: &Config) -> Result<()> {
     let Some(available) = plugin_available(config)? else { return Ok(()); };
 
-    match (available, controls.attached) {
+    match (available, listener.attached()) {
         // exit if specified
         (false, _) if config.exit_with_plugin => {
             glib::idle_add(|| { crate::exit(); glib::Continue(false) }); },
         // attach/detach if needed
-        (true, false) => controls.attach()?,
-        (false, true) => controls.detach()?,
+        (true, false) => listener.attach()?,
+        (false, true) => listener.detach()?,
         _ => (),
     }
 
     Ok(())
 }
 
-pub fn update(controls: &mut Controls, config: &Config) -> Result<()> {
-    update_metadata(controls, config)?;
-    update_playback(controls, config)?;
-    update_volume(controls, config)?;
+pub fn update(listener: &mut impl Listener, config: &Config) -> Result<()> {
+    update_metadata(listener, config)?;
+    update_playback(listener, config)?;
+    update_volume(listener, config)?;
     Ok(())
 }
 
-fn update_playback(controls: &mut Controls, config: &Config) -> Result<()> {
+fn update_playback(listener: &mut impl Listener, config: &Config) -> Result<()> {
     let playback = config.read_comm_file(PLAYBACK_FILE)
         .context("failed to read the playback file")?;
 
@@ -140,7 +140,7 @@ fn update_playback(controls: &mut Controls, config: &Config) -> Result<()> {
             }
         };
 
-        controls.set_playback(playback)
+        listener.set_playback(&playback)
             .context("failed to set the player's playback")?;
     } else {
         return Err(MalformedFile::Playback(playback.trim().to_owned()))?;
@@ -148,7 +148,7 @@ fn update_playback(controls: &mut Controls, config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn update_metadata(controls: &mut Controls, config: &Config) -> Result<()> {
+fn update_metadata(listener: &mut impl Listener, config: &Config) -> Result<()> {
     let metadata = config.read_comm_file(METADATA_FILE)
         .context("failed to read the metadata file")?;
 
@@ -165,8 +165,8 @@ fn update_metadata(controls: &mut Controls, config: &Config) -> Result<()> {
             .map(Duration::from_millis)
             .context("failed to parse the song duration as a number")?;
 
-        controls
-            .set_metadata(MediaMetadata {
+        listener
+            .set_metadata(&MediaMetadata {
                 title: Some(title),
                 album: Some(album),
                 artist: Some(artist),
@@ -180,7 +180,7 @@ fn update_metadata(controls: &mut Controls, config: &Config) -> Result<()> {
     }
 }
 
-fn update_volume(controls: &mut Controls, config: &Config) -> Result<()> {
+fn update_volume(listener: &mut impl Listener, config: &Config) -> Result<()> {
     let volume = config.read_comm_file(VOLUME_FILE)
         .context("failed to read the volume file")?;
 
@@ -192,7 +192,7 @@ fn update_volume(controls: &mut Controls, config: &Config) -> Result<()> {
 
     debug!("updating volume: {volume}");
 
-    controls.set_volume(volume)
+    listener.set_volume(volume)
         .context("failed to set the player's volume")?;
 
     Ok(())
