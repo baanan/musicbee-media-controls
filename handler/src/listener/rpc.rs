@@ -37,6 +37,8 @@ impl Rpc {
 
 impl Listener for Rpc {
     fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+        if !self.attached { return Ok(()); }
+
         trace!("updating metadata in rpc");
         let MediaMetadata { title, album, artist, cover_url, .. } = metadata;
 
@@ -86,9 +88,7 @@ impl Listener for Rpc {
         Ok(())
     }
 
-    fn attached(&self) -> bool {
-        true
-    }
+    fn attached(&self) -> bool { self.attached }
 }
 
 struct UploadedFile {
@@ -277,6 +277,7 @@ impl UploadService for Imgur {
     }
 }
 
+#[derive(Debug)]
 struct ImgurImage {
     url: Url,
     delete_hash: String,

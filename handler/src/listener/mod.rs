@@ -61,7 +61,6 @@ impl List {
 
     pub fn attach_if_available(mut self, config: &Config) -> Result<Self> {
         if filesystem::plugin_available(config)?.unwrap_or_default() { 
-            trace!("attaching");
             self.attach_and_update(config)?; 
         }
         Ok(self)
@@ -96,14 +95,15 @@ impl Listener for List {
 
     fn attach(&mut self) -> Result<()> {
         for listener in &mut self.listeners {
-            listener.attach()?;
+            if !listener.attached() { listener.attach()?; }
         }
         Ok(())
     }
 
     fn detach(&mut self) -> Result<()> {
+        trace!("recieved detach");
         for listener in &mut self.listeners {
-            listener.detach()?;
+            if listener.attached() { listener.detach()?; }
         }
         Ok(())
     }

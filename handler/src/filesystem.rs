@@ -106,7 +106,7 @@ pub fn plugin_activation_changed(
     match (available, listener.attached()) {
         // exit if specified
         (false, _) if config.exit_with_plugin => message_sender.send(Message::Exit)
-            .expect("main thread will always quit after dropping the reciever"),
+            .expect("main thread will always quit after dropping the reciever, so there is no chance of it hanging up"),
         // attach/detach if needed
         (true, false) => listener.attach_and_update(config)?,
         (false, true) => listener.detach()?,

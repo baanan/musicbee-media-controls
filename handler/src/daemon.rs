@@ -2,7 +2,7 @@ use std::{path::{PathBuf, Path}, sync::{Arc, mpsc}, fs, process::Command, thread
 
 use daemonize::Daemonize;
 use anyhow::{Result, Context, bail};
-use log::error;
+use log::{error, debug, trace};
 
 use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Listener}, filesystem, tray};
 
@@ -79,7 +79,12 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     let config = Arc::new(config);
 
     // setup messages
-    let (tx, rx) = mpsc::sync_channel(0);
+    // it's important that the channel has some
+    // space in its buffer so that the filesystem
+    // doesn't block in filesystem::plugin_activation_changed
+    // as that could create a deadlock when the daemon exits
+    // and tries to lock the listeners to detach them
+    let (tx, rx) = mpsc::sync_channel(2);
 
     {
         let tx = tx.clone();
@@ -114,7 +119,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     let _watcher = filesystem::watch(listeners.clone(), config.clone(), tx.clone())
         .context("failed to start to watch the filesystem")?;
 
-    if tray {
+    let gtk_handle = tray.then(|| {
         let listeners = listeners.clone();
         let config = config.clone();
         // initialize gtk in another thread
@@ -129,17 +134,22 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
 
             // start gtk event loop
             gtk::main();
-        });
-    }
+        })
+    });
 
     // wait until something has been recieved
     // (either an exit signal or a notification that all senders have hung up)
     let _ = rx.recv();
 
+    debug!("recieved exit signal");
+
     // cleanup
-    if tray {
+    if let Some(gtk_handle) = gtk_handle {
         glib::idle_add_once(gtk::main_quit);
+        gtk_handle.join().expect("tray panicked");
     }
+
+    trace!("caught up with gtk");
 
     // Detach the listeners at the end
     // this isn't necessary for the media controls,
@@ -147,8 +157,12 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     listeners.lock().unwrap().detach()
         .context("failed to finally detach everything")?;
 
+    trace!("listeners have detached");
+
     remove_pid(&config)
         .context("failed to remove the pid")?;
+
+    trace!("removed pid, fully exiting");
 
     Ok(())
 }

@@ -26,7 +26,6 @@ pub fn create(
     {
         let listeners = listeners.clone();
         let config = config.clone();
-        #[allow(clippy::significant_drop_tightening)] // clippy can't count
         tray.add_menu_item("Attach", move || {
             listeners.lock().unwrap().attach_and_update(&config)
                 .unwrap_or_else(|err| error!("failed to attach: {err}"));
