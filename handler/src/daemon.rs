@@ -4,7 +4,7 @@ use daemonize::Daemonize;
 use anyhow::{Result, Context, bail};
 use log::error;
 
-use crate::{config::Config, listener::{media_controls::Controls, self, Listener}, filesystem, tray};
+use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Listener}, filesystem, tray};
 
 pub fn pid_file(config: &Config) -> PathBuf {
     crate::project_dirs().and_then(|directories| directories.runtime_dir().map(Path::to_owned))
@@ -92,11 +92,11 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // attach to media controls
     let controls = Controls::new(config.clone())
         .context("failed to initialize the media controls")?;
-    // let rpc = Rpc::new(config.clone());
+    let rpc = Rpc::new(config.clone());
 
     let listeners = listener::List::new()
         .add(controls)
-        // .add(rpc)
+        .add(rpc)
         .attach_if_available(&config)?
         .wrap_shared();
     let _watcher = filesystem::watch(listeners.clone(), config.clone(), tx.clone())

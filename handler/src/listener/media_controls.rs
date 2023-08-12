@@ -7,7 +7,7 @@ use souvlaki::*;
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, filesystem, communication::Action};
+use crate::{config::Config, communication::Action};
 
 use super::Listener;
 
@@ -70,7 +70,6 @@ impl Listener for Controls {
         ).map_err(ControlsError::from)?;
         self.attached = true;
 
-        filesystem::update(self, &self.config.clone())?;
         Ok(())
     }
 

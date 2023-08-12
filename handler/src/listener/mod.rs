@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 
+use log::trace;
 use souvlaki::{MediaMetadata, MediaPlayback};
 
 use crate::{config::Config, filesystem};
@@ -42,7 +43,10 @@ impl List {
 
     pub fn attach_if_available(mut self, config: &Config) -> Result<Self> {
         if filesystem::plugin_available(config)?.unwrap_or_default() { 
+            trace!("attaching");
             self.attach()?; 
+            filesystem::update(&mut self, config)
+                .context("failed to update listeners after attach")?;
         }
         Ok(self)
     }
