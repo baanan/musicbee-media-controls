@@ -18,12 +18,31 @@ pub trait Listener {
     /// Called when the volume is updated
     fn volume(&mut self, volume: f64) -> Result<()>;
     /// Called when the playback is updated
-    fn playback(&mut self, playback: &MediaPlayback) -> Result<()>;
+    fn playback_inner(&mut self, playback: &MediaPlayback) -> Result<()>;
 
     /// Attach / resume the listener
     fn attach(&mut self) -> Result<()>;
     /// Detach / pause the listener
     fn detach(&mut self) -> Result<()>;
+
+    fn attach_and_update(&mut self, config: &Config) -> Result<()> where Self: Sized {
+        self.attach()?;
+        filesystem::update(self, config)
+            .context("failed to update listeners after attach")?;
+        Ok(())
+    }
+
+    fn playback(&mut self, playback: &MediaPlayback, config: &Config) -> Result<()> where Self: Sized {
+        if config.detach_on_stop { 
+            let attached = self.attached();
+            match playback {
+                MediaPlayback::Stopped if attached => self.detach()?,
+                MediaPlayback::Playing { .. } if !attached => self.attach_and_update(config)?,
+                _ => {},
+            }
+        }
+        self.playback_inner(playback)
+    }
 
     fn attached(&self) -> bool;
 }
@@ -43,9 +62,7 @@ impl List {
     pub fn attach_if_available(mut self, config: &Config) -> Result<Self> {
         if filesystem::plugin_available(config)?.unwrap_or_default() { 
             trace!("attaching");
-            self.attach()?; 
-            filesystem::update(&mut self, config)
-                .context("failed to update listeners after attach")?;
+            self.attach_and_update(config)?; 
         }
         Ok(self)
     }
@@ -70,9 +87,9 @@ impl Listener for List {
         Ok(())
     }
 
-    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
+    fn playback_inner(&mut self, playback: &MediaPlayback) -> Result<()> {
         for listener in &mut self.listeners {
-            listener.playback(playback)?;
+            listener.playback_inner(playback)?;
         }
         Ok(())
     }

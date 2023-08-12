@@ -199,6 +199,8 @@ namespace MusicBeePlugin
         {
             string state = null;
 
+            // TODO: fix the plugin reporting the player as stopped
+            // whenever tracks are switched
             switch (mbApiInterface.Player_GetPlayState())
             {
                 case PlayState.Paused:

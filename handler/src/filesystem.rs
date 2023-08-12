@@ -108,7 +108,7 @@ pub fn plugin_activation_changed(
         (false, _) if config.exit_with_plugin => message_sender.send(Message::Exit)
             .expect("main thread will always quit after dropping the reciever"),
         // attach/detach if needed
-        (true, false) => listener.attach()?,
+        (true, false) => listener.attach_and_update(config)?,
         (false, true) => listener.detach()?,
         _ => (),
     }
@@ -153,7 +153,7 @@ fn update_playback(listener: &mut impl Listener, config: &Config) -> Result<()> 
             }
         };
 
-        listener.playback(&playback)
+        listener.playback(&playback, config)
             .context("failed to set the player's playback")?;
     } else {
         return Err(MalformedFile::Playback(playback.trim().to_owned()))?;

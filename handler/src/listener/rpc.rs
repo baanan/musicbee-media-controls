@@ -63,7 +63,7 @@ impl Listener for Rpc {
         Ok(())
     }
 
-    fn playback(&mut self, _playback: &souvlaki::MediaPlayback) -> Result<()> {
+    fn playback_inner(&mut self, _playback: &souvlaki::MediaPlayback) -> Result<()> {
         Ok(())
     }
 

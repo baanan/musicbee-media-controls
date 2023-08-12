@@ -28,12 +28,8 @@ pub fn create(
         let config = config.clone();
         #[allow(clippy::significant_drop_tightening)] // clippy can't count
         tray.add_menu_item("Attach", move || {
-            let mut listeners = listeners.lock().unwrap();
-
-            listeners.attach()
+            listeners.lock().unwrap().attach_and_update(&config)
                 .unwrap_or_else(|err| error!("failed to attach: {err}"));
-            filesystem::update(&mut *listeners, &config)
-                .unwrap_or_else(|err| error!("failed to refresh controls: {err}"));
         })?;
     }
 

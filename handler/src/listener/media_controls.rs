@@ -102,15 +102,7 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the playback of the controls
-    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
-        if self.config.detach_on_stop { 
-            match playback {
-                MediaPlayback::Stopped if self.attached => self.detach()?,
-                MediaPlayback::Playing { .. } if !self.attached => self.attach()?,
-                _ => {},
-            }
-        }
-
+    fn playback_inner(&mut self, playback: &MediaPlayback) -> Result<()> {
         if self.attached { 
             self.controls.set_playback(playback.clone()).map_err(ControlsError::from)?; 
         }
