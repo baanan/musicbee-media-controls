@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::{Arc, Mutex}, io};
+use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::{Arc, Mutex, mpsc::SyncSender}, io};
 
 use anyhow::{Result, Context};
 use log::*;
@@ -7,7 +7,7 @@ use notify::{Watcher, RecursiveMode, event::{Event, EventKind, ModifyKind}, Reco
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, listener::Listener};
+use crate::{config::Config, listener::Listener, daemon::Message};
 
 pub const METADATA_FILE: &str = "metadata";
 pub const PLAYBACK_FILE: &str = "playback";
@@ -15,12 +15,16 @@ pub const ACTION_FILE: &str = "action";
 pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
 pub const VOLUME_FILE: &str = "volume";
 
-pub fn watch(listener: Arc<Mutex<impl Listener + Send + 'static>>, config: Arc<Config>) -> notify::Result<RecommendedWatcher> {
+pub fn watch(
+    listener: Arc<Mutex<impl Listener + Send + 'static>>, 
+    config: Arc<Config>,
+    message_sender: SyncSender<Message>,
+) -> Result<RecommendedWatcher> {
     let communication_directory = config.communication.directory.clone();
 
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
-        handle_event(event, &listener, &config);
+        handle_event(event, &listener, &config, &message_sender);
     })?;
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)?;
 
@@ -42,7 +46,12 @@ pub fn create_file_structure(config: &Config) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_event(event: notify::Result<Event>, listener: &Arc<Mutex<impl Listener>>, config: &Config) {
+fn handle_event(
+    event: notify::Result<Event>,
+    listener: &Arc<Mutex<impl Listener>>,
+    config: &Config,
+    message_sender: &SyncSender<Message>,
+) {
     let Ok(event) = event else { return };
 
     if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
@@ -54,13 +63,13 @@ fn handle_event(event: notify::Result<Event>, listener: &Arc<Mutex<impl Listener
         for file_name in file_names {
             match file_name {
                 METADATA_FILE => update_metadata(&mut *listener.lock().unwrap(), config)
-                    .unwrap_or_else(|err| error!("failed to handle change in metadata: {err}")),
+                    .unwrap_or_else(|err| error!("failed to handle change in metadata: {err:?}")),
                 PLAYBACK_FILE => update_playback(&mut *listener.lock().unwrap(), config)
-                    .unwrap_or_else(|err| error!("failed to handle change in playback: {err}")),
+                    .unwrap_or_else(|err| error!("failed to handle change in playback: {err:?}")),
                 VOLUME_FILE => update_volume(&mut *listener.lock().unwrap(), config)
-                    .unwrap_or_else(|err| error!("failed to handle change in volume: {err}")),
-                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut *listener.lock().unwrap(), config)
-                    .unwrap_or_else(|err| error!("failed to handle change in plugin activation: {err}")),
+                    .unwrap_or_else(|err| error!("failed to handle change in volume: {err:?}")),
+                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut *listener.lock().unwrap(), config, message_sender)
+                    .unwrap_or_else(|err| error!("failed to handle change in plugin activation: {err:?}")),
                 _ => {},
             }
         }
@@ -87,13 +96,17 @@ pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
     Ok(Some(text.parse().context("failed to parse plugin availability")?))
 }
 
-pub fn plugin_activation_changed(listener: &mut impl Listener, config: &Config) -> Result<()> {
+pub fn plugin_activation_changed(
+    listener: &mut impl Listener,
+    config: &Config,
+    message_sender: &SyncSender<Message>,
+) -> Result<()> {
     let Some(available) = plugin_available(config)? else { return Ok(()); };
 
     match (available, listener.attached()) {
         // exit if specified
-        (false, _) if config.exit_with_plugin => {
-            glib::idle_add(|| { crate::exit(); glib::Continue(false) }); },
+        (false, _) if config.exit_with_plugin => message_sender.send(Message::Exit)
+            .expect("main thread will always quit after dropping the reciever"),
         // attach/detach if needed
         (true, false) => listener.attach()?,
         (false, true) => listener.detach()?,
@@ -140,7 +153,7 @@ fn update_playback(listener: &mut impl Listener, config: &Config) -> Result<()> 
             }
         };
 
-        listener.set_playback(&playback)
+        listener.playback(&playback)
             .context("failed to set the player's playback")?;
     } else {
         return Err(MalformedFile::Playback(playback.trim().to_owned()))?;
@@ -166,7 +179,7 @@ fn update_metadata(listener: &mut impl Listener, config: &Config) -> Result<()> 
             .context("failed to parse the song duration as a number")?;
 
         listener
-            .set_metadata(&MediaMetadata {
+            .metadata(&MediaMetadata {
                 title: Some(title),
                 album: Some(album),
                 artist: Some(artist),
@@ -192,7 +205,7 @@ fn update_volume(listener: &mut impl Listener, config: &Config) -> Result<()> {
 
     debug!("updating volume: {volume}");
 
-    listener.set_volume(volume)
+    listener.volume(volume)
         .context("failed to set the player's volume")?;
 
     Ok(())

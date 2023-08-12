@@ -1,13 +1,17 @@
-use std::sync::{Mutex, Arc};
+use std::sync::{Mutex, Arc, mpsc::SyncSender};
 
 use log::*;
 use tray_item::{TrayItem, IconSource, TIError};
 
-use crate::{logger, config::Config, listener::{Listener, self}, filesystem};
+use crate::{logger, config::Config, listener::{Listener, self}, filesystem, daemon::Message};
 
 // TODO: fancier tray (attach toggle, metadata)
 
-pub fn create(listeners: Arc<Mutex<listener::List>>, config: Arc<Config>) -> Result<(), TIError> {
+pub fn create(
+    listeners: Arc<Mutex<listener::List>>,
+    config: Arc<Config>,
+    message_sender: SyncSender<Message>
+) -> Result<(), TIError> {
     let mut tray = TrayItem::new(
         "MusicBee Media Controls",
         IconSource::Resource("musicbee-linux-mediakeys-light")
@@ -46,9 +50,10 @@ pub fn create(listeners: Arc<Mutex<listener::List>>, config: Arc<Config>) -> Res
     tray.add_menu_item("Show Logs", move || {
         logger::open(&config);
     })?;
-    
-    tray.add_menu_item("Quit", || {
-        crate::exit();
+
+    tray.add_menu_item("Quit", move || {
+        message_sender.send(Message::Exit)
+            .expect("main thread will always be available until it quits");
     })?;
 
     Ok(())

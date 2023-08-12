@@ -34,16 +34,9 @@ fn main() -> Result<()> {
 
     filesystem::create_file_structure(&config)
         .context("failed to create the communication file structure")?;
-    logger::init(&config)
-        .context("failed to start logging")?;
-
-    // if the config originally failed to parse, notify the user
-    if let Some(config_err) = config_err {
-        error!("failed to parse config, got: {config_err}. Returned to defaults");
-    }
 
     match cli.command {
-        Commands::Run { .. } => run(config, &cli.command)?,
+        Commands::Run { .. } => run(config, &cli.command, config_err)?,
         Commands::End => 
             daemon::end(&config, true).context("failed to end daemon")?,
         Commands::ConfigFile { open: false } => 
@@ -55,10 +48,18 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run(config: Config, command: &Commands) -> Result<()> {
+fn run(config: Config, command: &Commands, outstanding_error: Option<Error>) -> Result<()> {
     let Commands::Run { force, detach, tray, replace } = command else {
         panic!("expected command to be a Commands::Run");
     };
+
+    logger::init(&config)
+        .context("failed to start logging")?;
+
+    // if the config originally failed to parse, notify the user
+    if let Some(outstanding_error) = outstanding_error {
+        error!("failed to parse config, got: {outstanding_error}. Returned to defaults");
+    }
 
     if *replace { 
         daemon::end(&config, false).context("failed to replace previous daemon")?; 
@@ -71,8 +72,4 @@ fn run(config: Config, command: &Commands) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn exit() {
-    gtk::main_quit();
 }

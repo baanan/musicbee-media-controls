@@ -4,14 +4,24 @@ use anyhow::Result;
 
 use souvlaki::{MediaMetadata, MediaPlayback};
 
+use crate::{config::Config, filesystem};
+
 pub mod media_controls;
+pub mod rpc;
 
 pub trait Listener {
-    fn set_metadata(&mut self, metadata: &MediaMetadata) -> Result<()>;
-    fn set_volume(&mut self, volume: f64) -> Result<()>;
-    fn set_playback(&mut self, playback: &MediaPlayback) -> Result<()>;
+    /// Called when the metadata is updated
+    ///
+    /// The `metadata`'s cover is guaranteed to be a valid [`Url`](url::Url)
+    fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()>;
+    /// Called when the volume is updated
+    fn volume(&mut self, volume: f64) -> Result<()>;
+    /// Called when the playback is updated
+    fn playback(&mut self, playback: &MediaPlayback) -> Result<()>;
 
+    /// Attach / resume the listener
     fn attach(&mut self) -> Result<()>;
+    /// Detach / pause the listener
     fn detach(&mut self) -> Result<()>;
 
     fn attached(&self) -> bool;
@@ -30,29 +40,36 @@ impl List {
         self
     }
 
+    pub fn attach_if_available(mut self, config: &Config) -> Result<Self> {
+        if filesystem::plugin_available(config)?.unwrap_or_default() { 
+            self.attach()?; 
+        }
+        Ok(self)
+    }
+
     pub fn wrap_shared(self) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(self))
     }
 }
 
 impl Listener for List {
-    fn set_metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+    fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
         for listener in &mut self.listeners {
-            listener.set_metadata(metadata)?;
+            listener.metadata(metadata)?;
         }
         Ok(())
     }
 
-    fn set_volume(&mut self, volume: f64) -> Result<()> {
+    fn volume(&mut self, volume: f64) -> Result<()> {
         for listener in &mut self.listeners {
-            listener.set_volume(volume)?;
+            listener.volume(volume)?;
         }
         Ok(())
     }
 
-    fn set_playback(&mut self, playback: &MediaPlayback) -> Result<()> {
+    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
         for listener in &mut self.listeners {
-            listener.set_playback(playback)?;
+            listener.playback(playback)?;
         }
         Ok(())
     }

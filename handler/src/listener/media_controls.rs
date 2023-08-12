@@ -52,16 +52,6 @@ impl Controls {
             attached: false,
         })
     }
-
-    /// Creates new media controls and attaches if the plugin is available
-    pub fn init(config: Arc<Config>) -> Result<Self> {
-        let plugin_available = filesystem::plugin_available(&config)?;
-        let plugin_available = plugin_available.unwrap_or_default();
-
-        let mut controls = Self::new(config)?;
-        if plugin_available { controls.attach()?; }
-        Ok(controls)
-    }
 }
 
 impl Listener for Controls {
@@ -98,7 +88,8 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the metadata of the controls
-    fn set_metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+    fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+        trace!("setting metadata of controls");
         if self.attached { 
             self.controls.set_metadata(metadata.clone()).map_err(ControlsError::from)?; 
         }
@@ -106,13 +97,13 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the volume of the controls
-    fn set_volume(&mut self, volume: f64) -> Result<()> {
+    fn volume(&mut self, volume: f64) -> Result<()> {
         self.controls.set_volume(volume).map_err(ControlsError::from)?;
         Ok(())
     }
 
     /// Delegate to set the playback of the controls
-    fn set_playback(&mut self, playback: &MediaPlayback) -> Result<()> {
+    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
         if self.config.detach_on_stop { 
             match playback {
                 MediaPlayback::Stopped if self.attached => self.detach()?,

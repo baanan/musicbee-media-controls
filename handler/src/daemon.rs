@@ -1,9 +1,10 @@
-use std::{path::{PathBuf, Path}, sync::Arc, fs, process::Command};
+use std::{path::{PathBuf, Path}, sync::{Arc, mpsc}, fs, process::Command, thread, time::Duration};
 
 use daemonize::Daemonize;
 use anyhow::{Result, Context, bail};
+use log::error;
 
-use crate::{config::Config, listener::{media_controls::Controls, self}, filesystem, tray};
+use crate::{config::Config, listener::{media_controls::Controls, self, Listener}, filesystem, tray};
 
 pub fn pid_file(config: &Config) -> PathBuf {
     crate::project_dirs().and_then(|directories| directories.runtime_dir().map(Path::to_owned))
@@ -29,7 +30,7 @@ pub fn remove_pid(config: &Config) -> Result<()> {
 
 pub fn run(config: Config, detach: bool, tray: bool) -> Result<()> {
     if let Some(pid) = get_pid(&config)? {
-        bail!("deamon is already running with pid {pid}, use --force to ignore")
+        bail!("deamon is already running with pid {pid}, use --force to ignore, or omit --no-replace to replace")
     }
     create(config, detach, tray)
 }
@@ -47,6 +48,10 @@ pub fn end(config: &Config, force: bool) -> Result<()> {
         .arg(pid.to_string())
         .spawn()?;
 
+    println!("waiting for old daemon to be killed...");
+    // HACK: constant sleep
+    std::thread::sleep(Duration::from_millis(500));
+
     remove_pid(config)
 }
 
@@ -56,6 +61,10 @@ pub fn init_pid_dir(config: &Config) -> Result<()> {
             .expect("pid file must be in a directory")
     )?;
     Ok(())
+}
+
+pub enum Message {
+    Exit,
 }
 
 pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
@@ -69,37 +78,66 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // share config
     let config = Arc::new(config);
 
+    // setup messages
+    let (tx, rx) = mpsc::sync_channel(0);
+
+    {
+        let tx = tx.clone();
+        ctrlc::set_handler(move || { 
+            tx.send(Message::Exit)
+                .expect("reciever doesn't hang up except if the whole program exits"); }
+        ).context("failed to set termination interupt")?;
+    }
+
     // attach to media controls
-    let controls = Controls::init(config.clone())
+    let controls = Controls::new(config.clone())
         .context("failed to initialize the media controls")?;
+    // let rpc = Rpc::new(config.clone());
 
     let listeners = listener::List::new()
         .add(controls)
+        // .add(rpc)
+        .attach_if_available(&config)?
         .wrap_shared();
-    let _watcher = filesystem::watch(listeners.clone(), config.clone())
+    let _watcher = filesystem::watch(listeners.clone(), config.clone(), tx.clone())
         .context("failed to start to watch the filesystem")?;
 
     if tray {
-        // initialize gtk
-        gtk::init().unwrap();
+        let listeners = listeners.clone();
+        let config = config.clone();
+        // initialize gtk in another thread
+        // so this thread can handle messages
+        thread::spawn(move || {
+            // initialize gtk
+            gtk::init().unwrap();
 
-        // start system tray
-        tray::create(listeners, config.clone())
-            .context("failed to start system tray")?;
+            // start system tray
+            tray::create(listeners, config, tx)
+                .unwrap_or_else(|err| error!("failed to start system tray: {err:?}"));
 
-        // start gtk event loop
-        gtk::main();
-    } else {
-        // pause the thread
-        // (presumably until a kill command is sent)
-        std::thread::park();
+            // start gtk event loop
+            gtk::main();
+        });
     }
 
+    // wait until something has been recieved
+    // (either an exit signal or a notification that all senders have hung up)
+    let _ = rx.recv();
+
     // cleanup
-    // NOTE: this isn't run if the process was killed
-    // removing the pid is also done by self::end
+    if tray {
+        glib::idle_add_once(gtk::main_quit);
+    }
+
+    // Detach the listeners at the end
+    // this isn't necessary for the media controls,
+    // but it is for rpc
+    listeners.lock().unwrap().detach()
+        .context("failed to finally detach everything")?;
+
     remove_pid(&config)
         .context("failed to remove the pid")?;
+
     Ok(())
 }
 
