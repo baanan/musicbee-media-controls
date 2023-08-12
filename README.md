@@ -37,6 +37,21 @@ Generic configuration can be found with `musicbee_media_controls config-file --o
     communication: (
         directory: "/tmp/musicbee-mediakeys",
     ),
+    // media control handling
+    media_controls: (
+        enabled: true,
+        // how long should the default seek be
+        seek_amount: (
+            secs: 5,
+            nanos: 0,
+        ),
+        // should the media controls allow externally setting the volume
+        send_volume: true,
+    ),
+    // discord rich presence
+    rpc: (
+        enabled: false,
+    ),
     // a mapping between the music folder of the wine prefix and your own music folder
     music_file_mapper: (
         from: "C:/Users/{username}/Music",
@@ -48,16 +63,9 @@ Generic configuration can be found with `musicbee_media_controls config-file --o
         to: "{wine_prefix}/drive_c/",
     ),
     // should the handler detach the media controls when musicbee is stopped
-    detach_on_stop: true,
+    detach_on_stop: false,
     // should the handler be closed when musicbee is closed
     exit_with_plugin: true,
-    // how long should the default seek be
-    seek_amount: (
-        secs: 5,
-        nanos: 0,
-    ),
-    // should the media controls allow externally setting the volume
-    send_volume: true,
 )
 ```
 
