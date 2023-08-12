@@ -113,11 +113,11 @@ impl UnresolvedConfig {
             music_file_mapper: self.music_file_mapper.resolve(&cloned),
             temporary_file_mapper: self.temporary_file_mapper.resolve(&cloned),
             commands: self.commands.resolve(&cloned),
+            rpc: self.rpc,
             communication: self.communication,
             detach_on_stop: self.detach_on_stop,
             exit_with_plugin: self.exit_with_plugin,
-            seek_amount: self.seek_amount,
-            send_volume: self.send_volume,
+            media_controls: self.media_controls,
         }
     }
 }
@@ -226,6 +226,17 @@ impl Communication {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct MediaControls {
+    pub enabled: bool,
+    pub seek_amount: Duration,
+    pub send_volume: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Rpc {
+    pub enabled: bool,
+}
 
 pub type Config = Referenced<ReferencedString>;
 type UnresolvedConfig = Referenced<UnresolvedReference>;
@@ -235,12 +246,12 @@ type UnresolvedConfig = Referenced<UnresolvedReference>;
 pub struct Referenced<T> {
     pub commands: Commands<T>,
     pub communication: Communication,
+    pub media_controls: MediaControls,
+    pub rpc: Rpc,
     pub music_file_mapper: Mapping<T>,
     pub temporary_file_mapper: Mapping<T>,
     pub detach_on_stop: bool,
     pub exit_with_plugin: bool,
-    pub seek_amount: Duration,
-    pub send_volume: bool,
 }
 
 impl Config {
@@ -283,6 +294,8 @@ impl Default for Config {
         UnresolvedConfig {
             communication: Communication::default(),
             commands: Commands::default(),
+            media_controls: MediaControls::default(),
+            rpc: Rpc::default(),
             music_file_mapper: Mapping {
                 from: "C:/Users/{username}/Music".into(),
                 to: "{home_dir}/Music".into(),
@@ -293,8 +306,6 @@ impl Default for Config {
             },
             detach_on_stop: true,
             exit_with_plugin: true,
-            seek_amount: Duration::from_secs(5),
-            send_volume: true,
         }
             .resolve()
     }
@@ -315,6 +326,25 @@ impl Default for Communication {
     fn default() -> Self {
         Self {
             directory: "/tmp/musicbee-mediakeys".to_string(),
+        }
+    }
+}
+
+impl Default for MediaControls {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            seek_amount: Duration::from_secs(5),
+            send_volume: true,
+        }
+    }
+}
+
+#[allow(clippy::derivable_impls)] // more will be added later
+impl Default for Rpc {
+    fn default() -> Self {
+        Self {
+            enabled: false,
         }
     }
 }

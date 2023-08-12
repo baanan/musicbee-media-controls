@@ -130,12 +130,12 @@ fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
         Previous => config.run_simple_command("/Previous")?,
         Stop => config.run_simple_command("/Stop")?,
         OpenUri(uri) => config.run_command("/Play", Some(map_uri(uri)))?,
-        Seek(direction) => directioned_duration_to_seek(direction, config.seek_amount)?
+        Seek(direction) => directioned_duration_to_seek(direction, config.media_controls.seek_amount)?
             .run(config)?,
         SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration)?
             .run(config)?,
         SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config)?,
-        SetVolume(vol) => if config.send_volume { Action::Volume(vol).run(config)? },
+        SetVolume(vol) => if config.media_controls.send_volume { Action::Volume(vol).run(config)? },
         _ => { error!("Event {event:?} not implemented") } // TODO: implement other events
     }
     Ok(())

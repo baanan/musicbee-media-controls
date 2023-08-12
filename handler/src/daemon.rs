@@ -89,16 +89,28 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
         ).context("failed to set termination interupt")?;
     }
 
-    // attach to media controls
-    let controls = Controls::new(config.clone())
-        .context("failed to initialize the media controls")?;
-    let rpc = Rpc::new(config.clone());
+    // setup listeners
+    let mut listeners = listener::List::new();
 
-    let listeners = listener::List::new()
-        .add(controls)
-        .add(rpc)
+    // media controls
+    if config.media_controls.enabled {
+        let controls = Controls::new(config.clone())
+            .context("failed to initialize the media controls")?;
+        listeners.add(controls);
+    }
+
+    // rpc
+    if config.rpc.enabled {
+        let rpc = Rpc::new(config.clone());
+        listeners.add(rpc);
+    }
+
+    // finish setting up the listeners
+    let listeners = listeners
         .attach_if_available(&config)?
         .wrap_shared();
+
+    // start watching the filesystem
     let _watcher = filesystem::watch(listeners.clone(), config.clone(), tx.clone())
         .context("failed to start to watch the filesystem")?;
 

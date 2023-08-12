@@ -36,9 +36,8 @@ pub struct List {
 impl List {
     pub fn new() -> Self { Self::default() }
 
-    pub fn add(mut self, listener: impl Listener + Send + 'static) -> Self {
+    pub fn add(&mut self, listener: impl Listener + Send + 'static) {
         self.listeners.push(Box::new(listener));
-        self
     }
 
     pub fn attach_if_available(mut self, config: &Config) -> Result<Self> {
