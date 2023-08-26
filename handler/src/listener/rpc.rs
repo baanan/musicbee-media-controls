@@ -141,6 +141,8 @@ impl CoverCache {
         // add it to the cache
         self.insert(file, &url);
 
+        trace!("cover uploaded to {url}");
+
         Ok(url)
     }
 

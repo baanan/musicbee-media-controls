@@ -93,7 +93,9 @@ impl Listener for Controls {
 
     /// Delegate to set the volume of the controls
     fn volume(&mut self, volume: f64) -> Result<()> {
-        self.controls.set_volume(volume).map_err(ControlsError::from)?;
+        if self.attached { 
+            self.controls.set_volume(volume).map_err(ControlsError::from)?;
+        }
         Ok(())
     }
 
