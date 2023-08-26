@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::{Arc, Mutex, mpsc::SyncSender}, io};
+use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::Arc, io};
 
 use anyhow::{Result, Context};
 use log::*;
@@ -7,7 +7,7 @@ use notify::{Watcher, RecursiveMode, event::{Event, EventKind, ModifyKind}, Reco
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, listener::Listener, daemon::Message};
+use crate::{config::Config, messages::MessageSender};
 
 pub const METADATA_FILE: &str = "metadata";
 pub const PLAYBACK_FILE: &str = "playback";
@@ -16,15 +16,14 @@ pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
 pub const VOLUME_FILE: &str = "volume";
 
 pub fn watch(
-    listener: Arc<Mutex<impl Listener + Send + 'static>>, 
+    message_sender: MessageSender,
     config: Arc<Config>,
-    message_sender: SyncSender<Message>,
 ) -> Result<RecommendedWatcher> {
     let communication_directory = config.communication.directory.clone();
 
     // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| {
-        handle_event(event, &listener, &config, &message_sender);
+        handle_event(event, &message_sender, &config);
     })?;
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)?;
 
@@ -48,9 +47,8 @@ pub fn create_file_structure(config: &Config) -> io::Result<()> {
 
 fn handle_event(
     event: notify::Result<Event>,
-    listener: &Arc<Mutex<impl Listener>>,
+    sender: &MessageSender,
     config: &Config,
-    message_sender: &SyncSender<Message>,
 ) {
     let Ok(event) = event else { return };
 
@@ -62,13 +60,13 @@ fn handle_event(
 
         for file_name in file_names {
             match file_name {
-                METADATA_FILE => update_metadata(&mut *listener.lock().unwrap(), config)
+                METADATA_FILE => update_metadata(sender, config)
                     .unwrap_or_else(|err| error!("failed to handle change in metadata: {err:?}")),
-                PLAYBACK_FILE => update_playback(&mut *listener.lock().unwrap(), config)
+                PLAYBACK_FILE => update_playback(sender, config)
                     .unwrap_or_else(|err| error!("failed to handle change in playback: {err:?}")),
-                VOLUME_FILE => update_volume(&mut *listener.lock().unwrap(), config)
+                VOLUME_FILE => update_volume(sender, config)
                     .unwrap_or_else(|err| error!("failed to handle change in volume: {err:?}")),
-                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(&mut *listener.lock().unwrap(), config, message_sender)
+                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(sender, config)
                     .unwrap_or_else(|err| error!("failed to handle change in plugin activation: {err:?}")),
                 _ => {},
             }
@@ -96,34 +94,25 @@ pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
     Ok(Some(text.parse().context("failed to parse plugin availability")?))
 }
 
+#[allow(unused_variables)] // TODO: todo
 pub fn plugin_activation_changed(
-    listener: &mut impl Listener,
+    sender: &MessageSender,
     config: &Config,
-    message_sender: &SyncSender<Message>,
 ) -> Result<()> {
-    let Some(available) = plugin_available(config)? else { return Ok(()); };
-
-    match (available, listener.attached()) {
-        // exit if specified
-        (false, _) if config.exit_with_plugin => message_sender.send(Message::Exit)
-            .expect("main thread will always quit after dropping the reciever, so there is no chance of it hanging up"),
-        // attach/detach if needed
-        (true, false) => listener.attach_and_update(config)?,
-        (false, true) => listener.detach()?,
-        _ => (),
+    if let Some(activated) = plugin_available(config)? {
+        sender.plugin_activated(activated);
     }
-
     Ok(())
 }
 
-pub fn update(listener: &mut impl Listener, config: &Config) -> Result<()> {
-    update_metadata(listener, config)?;
-    update_playback(listener, config)?;
-    update_volume(listener, config)?;
+pub fn update(sender: &MessageSender, config: &Config) -> Result<()> {
+    update_metadata(sender, config)?;
+    update_playback(sender, config)?;
+    update_volume(sender, config)?;
     Ok(())
 }
 
-fn update_playback(listener: &mut impl Listener, config: &Config) -> Result<()> {
+fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
     let playback = config.read_comm_file(PLAYBACK_FILE)
         .context("failed to read the playback file")?;
 
@@ -134,8 +123,6 @@ fn update_playback(listener: &mut impl Listener, config: &Config) -> Result<()> 
     let lines: Vec<_> = playback.lines().collect();
 
     if let [ playback, progress ] = lines[..] {
-        debug!("updating playback: {playback:?}");
-
         let progress = progress.parse()
             .map(Duration::from_millis)
             .map(|p| Some(MediaPosition(p)))
@@ -153,15 +140,14 @@ fn update_playback(listener: &mut impl Listener, config: &Config) -> Result<()> 
             }
         };
 
-        listener.playback(&playback, config)
-            .context("failed to set the player's playback")?;
+        sender.playback(playback);
     } else {
         return Err(MalformedFile::Playback(playback.trim().to_owned()))?;
     }
     Ok(())
 }
 
-fn update_metadata(listener: &mut impl Listener, config: &Config) -> Result<()> {
+fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
     let metadata = config.read_comm_file(METADATA_FILE)
         .context("failed to read the metadata file")?;
 
@@ -172,28 +158,25 @@ fn update_metadata(listener: &mut impl Listener, config: &Config) -> Result<()> 
     let lines: Vec<_> = metadata.lines().collect();
 
     if let [ title, album, artist, cover_url, duration ] = lines[..] {
-        debug!("updating metadata: {artist} - {title}");
-
         let duration = duration.parse()
             .map(Duration::from_millis)
             .context("failed to parse the song duration as a number")?;
 
-        listener
-            .metadata(&MediaMetadata {
+        sender
+            .metadata(MediaMetadata {
                 title: Some(title),
                 album: Some(album),
                 artist: Some(artist),
                 cover_url: map_cover(cover_url, config, artist, title).as_deref(),
                 duration: Some(duration),
-            })
-            .context("failed to set the player's metadata")?;
+            });
         Ok(())
     } else {
         Err(MalformedFile::Metadata(metadata))?
     }
 }
 
-fn update_volume(listener: &mut impl Listener, config: &Config) -> Result<()> {
+fn update_volume(sender: &MessageSender, config: &Config) -> Result<()> {
     let volume = config.read_comm_file(VOLUME_FILE)
         .context("failed to read the volume file")?;
 
@@ -203,10 +186,7 @@ fn update_volume(listener: &mut impl Listener, config: &Config) -> Result<()> {
     let volume: f64 = volume.trim().parse()
         .map_err(|_| MalformedFile::Volume(volume))?;
 
-    debug!("updating volume: {volume}");
-
-    listener.volume(volume)
-        .context("failed to set the player's volume")?;
+    sender.volume(volume);
 
     Ok(())
 }

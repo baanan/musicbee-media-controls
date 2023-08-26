@@ -1,17 +1,27 @@
-use std::sync::{Mutex, Arc, mpsc::SyncSender};
+use std::sync::Arc;
 
-use log::*;
-use tray_item::{TrayItem, IconSource, TIError};
+use tray_item::{TrayItem, IconSource};
 
-use crate::{logger, config::Config, listener::{Listener, self}, filesystem, daemon::Message};
+use crate::{config::Config, messages::MessageSender, logger};
+
+use anyhow::Result;
 
 // TODO: fancier tray (attach toggle, metadata)
 
-pub fn create(
-    listeners: Arc<Mutex<listener::List>>,
-    config: Arc<Config>,
-    message_sender: SyncSender<Message>
-) -> Result<(), TIError> {
+pub fn start(message_sender: MessageSender, config: Arc<Config>) -> Result<()> {
+    // initialize gtk
+    gtk::init().unwrap();
+
+    // create tray
+    self::create(message_sender, config)?;
+
+    // start gtk event loop
+    gtk::main();
+
+    Ok(())
+}
+
+pub fn create(message_sender: MessageSender, config: Arc<Config>) -> Result<()> {
     let mut tray = TrayItem::new(
         "MusicBee Media Controls",
         IconSource::Resource("musicbee-linux-mediakeys-light")
@@ -24,38 +34,22 @@ pub fn create(
     // TODO: make the tray look nicer
     
     {
-        let listeners = listeners.clone();
-        let config = config.clone();
-        tray.add_menu_item("Attach", move || {
-            listeners.lock().unwrap().attach_and_update(&config)
-                .unwrap_or_else(|err| error!("failed to attach: {err}"));
-        })?;
+        let message_sender = message_sender.clone();
+        tray.add_menu_item("Attach", move || message_sender.attach())?;
     }
 
     {
-        let listeners = listeners.clone();
-        tray.add_menu_item("Detach", move || {
-            listeners.lock().unwrap().detach()
-                .unwrap_or_else(|err| error!("failed to detach: {err}"));
-        })?;
+        let message_sender = message_sender.clone();
+        tray.add_menu_item("Detach", move || message_sender.detach())?;
     }
 
     {
-        let config = config.clone();
-        tray.add_menu_item("Refresh", move || {
-            filesystem::update(&mut *listeners.lock().unwrap(), &config)
-                .unwrap_or_else(|err| error!("failed to refresh controls: {err}"));
-        })?;
+        let message_sender = message_sender.clone();
+        tray.add_menu_item("Refresh", move || message_sender.update())?;
     }
 
-    tray.add_menu_item("Show Logs", move || {
-        logger::open(&config);
-    })?;
-
-    tray.add_menu_item("Quit", move || {
-        message_sender.send(Message::Exit)
-            .expect("main thread will always be available until it quits");
-    })?;
+    tray.add_menu_item("Show Logs", move || logger::open(&config))?;
+    tray.add_menu_item("Quit", move || message_sender.exit())?;
 
     Ok(())
 }

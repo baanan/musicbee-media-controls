@@ -39,7 +39,6 @@ impl Listener for Rpc {
     fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
         if !self.attached { return Ok(()); }
 
-        trace!("updating metadata in rpc");
         let MediaMetadata { title, album, artist, cover_url, .. } = metadata;
 
         let large_image = if let Some(cover_url) = cover_url {
@@ -65,7 +64,7 @@ impl Listener for Rpc {
         Ok(())
     }
 
-    fn playback_inner(&mut self, _playback: &souvlaki::MediaPlayback) -> Result<()> {
+    fn playback(&mut self, _playback: &souvlaki::MediaPlayback) -> Result<()> {
         Ok(())
     }
 

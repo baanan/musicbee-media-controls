@@ -1,10 +1,10 @@
-use std::{path::{PathBuf, Path}, sync::{Arc, mpsc}, fs, process::Command, thread, time::Duration};
+use std::{path::{PathBuf, Path}, sync::Arc, fs, thread, time::Duration};
 
 use daemonize::Daemonize;
 use anyhow::{Result, Context, bail};
 use log::{error, debug, trace};
 
-use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Listener}, filesystem, tray};
+use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Listener}, filesystem, tray, messages::Messages};
 
 pub fn pid_file(config: &Config) -> PathBuf {
     crate::project_dirs().and_then(|directories| directories.runtime_dir().map(Path::to_owned))
@@ -44,7 +44,7 @@ pub fn end(config: &Config, force: bool) -> Result<()> {
     };
 
     // WARN: this might not work for everything
-    Command::new("kill")
+    std::process::Command::new("kill")
         .arg(pid.to_string())
         .spawn()?;
 
@@ -63,11 +63,10 @@ pub fn init_pid_dir(config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub enum Message {
-    Exit,
-}
 
 pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
+    // -- setup -- //
+
     if detach {
         init_pid_dir(&config)?;
         Daemonize::new()
@@ -79,19 +78,12 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     let config = Arc::new(config);
 
     // setup messages
-    // it's important that the channel has some
-    // space in its buffer so that the filesystem
-    // doesn't block in filesystem::plugin_activation_changed
-    // as that could create a deadlock when the daemon exits
-    // and tries to lock the listeners to detach them
-    let (tx, rx) = mpsc::sync_channel(2);
+    let messages = Messages::new();
 
     {
-        let tx = tx.clone();
-        ctrlc::set_handler(move || { 
-            tx.send(Message::Exit)
-                .expect("reciever doesn't hang up except if the whole program exits"); }
-        ).context("failed to set termination interupt")?;
+        let tx = messages.sender();
+        ctrlc::set_handler(move || tx.exit())
+            .context("failed to set termination interupt")?;
     }
 
     // setup listeners
@@ -110,38 +102,36 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
         listeners.add(rpc);
     }
 
-    // finish setting up the listeners
-    let listeners = listeners
-        .attach_if_available(&config)?
-        .wrap_shared();
-
     // start watching the filesystem
-    let _watcher = filesystem::watch(listeners.clone(), config.clone(), tx.clone())
+    let watcher = filesystem::watch(messages.sender(), config.clone())
         .context("failed to start to watch the filesystem")?;
 
+    // set up the system tray
     let gtk_handle = tray.then(|| {
-        let listeners = listeners.clone();
         let config = config.clone();
+        let tx = messages.sender();
         // initialize gtk in another thread
         // so this thread can handle messages
-        thread::spawn(move || {
-            // initialize gtk
-            gtk::init().unwrap();
-
-            // start system tray
-            tray::create(listeners, config, tx)
-                .unwrap_or_else(|err| error!("failed to start system tray: {err:?}"));
-
-            // start gtk event loop
-            gtk::main();
-        })
+        thread::spawn(move || 
+            tray::start(tx, config)
+                .unwrap_or_else(|err| error!("failed to start system tray: {err:?}"))
+        )
     });
 
-    // wait until something has been recieved
-    // (either an exit signal or a notification that all senders have hung up)
-    let _ = rx.recv();
+    // -- running -- //
+
+    // get initial values by queueing up an update
+    messages.sender().update();
+
+    // start listening to messages
+    messages.listen_until_exit(&mut listeners, &config)?;
+
+    // -- cleanup -- //
 
     debug!("recieved exit signal");
+
+    // stop watching the filesystem before dropping everything else
+    drop(watcher);
 
     // cleanup
     if let Some(gtk_handle) = gtk_handle {
@@ -154,7 +144,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // Detach the listeners at the end
     // this isn't necessary for the media controls,
     // but it is for rpc
-    listeners.lock().unwrap().detach()
+    listeners.detach()
         .context("failed to finally detach everything")?;
 
     trace!("listeners have detached");

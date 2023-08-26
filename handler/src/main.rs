@@ -11,6 +11,7 @@ mod communication;
 mod cli;
 mod daemon;
 mod listener;
+mod messages;
 
 use clap::Parser;
 use cli::{Cli, Commands};

@@ -61,8 +61,6 @@ impl Listener for Controls {
             return Err(ControlsError::AlreadyAttached)?;
         }
 
-        trace!("Attaching");
-
         let config = self.config.clone();
         self.controls.attach(move |event| 
             handle_event(event, &config)
@@ -79,7 +77,6 @@ impl Listener for Controls {
             return Err(ControlsError::AlreadyDetached)?;
         }
 
-        trace!("Detaching");
         self.controls.detach().map_err(ControlsError::from)?;
         self.attached = false;
 
@@ -88,7 +85,6 @@ impl Listener for Controls {
 
     /// Delegate to set the metadata of the controls
     fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
-        trace!("setting metadata of controls");
         if self.attached { 
             self.controls.set_metadata(metadata.clone()).map_err(ControlsError::from)?; 
         }
@@ -102,7 +98,7 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the playback of the controls
-    fn playback_inner(&mut self, playback: &MediaPlayback) -> Result<()> {
+    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
         if self.attached { 
             self.controls.set_playback(playback.clone()).map_err(ControlsError::from)?; 
         }
