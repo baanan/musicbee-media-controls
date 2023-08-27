@@ -121,7 +121,9 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // -- running -- //
 
     // get initial values by queueing up an update
-    messages.sender().update();
+    if filesystem::plugin_available(&config)?.unwrap_or(false) { 
+        messages.sender().update(); 
+    }
 
     // start listening to messages
     messages.listen_until_exit(&mut listeners, &config)?;

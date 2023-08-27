@@ -1,18 +1,23 @@
 use std::{time::Duration, sync::mpsc::{SyncSender, Receiver, self}, ops::ControlFlow};
 
+use log::error;
 use souvlaki::{MediaMetadata, MediaPlayback};
-use anyhow::Result;
+use anyhow::{Result, Context};
 
 use crate::{listener::Listener, filesystem, config::Config};
 
 pub enum Command {
     Exit,
-    SetPlayback(MediaPlayback),
-    SetMetadata(OwnedMetadata),
-    SetVolume(f64),
-    SetAttached(bool),
-    PluginActivationUpdate(bool),
+    Playback(MediaPlayback),
+    Metadata(OwnedMetadata),
+    Volume(f64),
+    Attached(bool),
+    PluginActivated(bool),
     Update,
+    UpdatePlayback,
+    UpdateMetadata,
+    UpdateVolume,
+    UpdatePluginActivation,
 }
 
 impl Command {
@@ -21,8 +26,12 @@ impl Command {
         match self {
             Command::Exit => 
                 return Ok(ControlFlow::Break(())),
-            Command::SetPlayback(playback) => {
-                listener.playback(&playback)?;
+
+            Command::Metadata(metadata) => 
+                listener.metadata(&metadata.as_ref()).context("failed to set metadata")?, 
+            Command::Playback(playback) => {
+                listener.playback(&playback).context("failed to set playback")?;
+
                 if config.detach_on_stop {
                     match playback {
                         MediaPlayback::Stopped => tx.detach(),
@@ -32,26 +41,34 @@ impl Command {
                     }
                 }
             }, 
-            Command::SetMetadata(metadata) => 
-                listener.metadata(&metadata.as_ref())?, 
-            Command::SetVolume(volume) => 
-                listener.volume(volume)?,
-            Command::SetAttached(true) if !attached => {
-                listener.attach()?; 
+            Command::Volume(volume) => 
+                listener.volume(volume).context("failed to set volume")?,
+            Command::Attached(true) if !attached => {
+                listener.attach().context("failed to attach")?; 
                 tx.update();
             },
-            Command::SetAttached(false) if attached => 
-                listener.detach()?,
-            Command::PluginActivationUpdate(activated) => {
+            Command::Attached(false) if attached => 
+                listener.detach().context("failed to detach")?,
+            // ignore attaches when already attached and detaches when already detached
+            Command::Attached(_) => (),
+            Command::PluginActivated(activated) => {
                 if !activated && config.exit_with_plugin {
                     tx.exit();
                 } else {
                     tx.attach_as(activated);
                 }
             }
+
             Command::Update => 
-                filesystem::update(tx, config)?,
-            _ => (),
+                filesystem::update(tx, config).context("failed to update handlers")?,
+            Command::UpdateMetadata => 
+                filesystem::update_metadata(tx, config).context("failed to update metadata")?,
+            Command::UpdatePlayback => 
+                filesystem::update_playback(tx, config).context("failed to update playback")?,
+            Command::UpdateVolume => 
+                filesystem::update_volume(tx, config).context("failed to update volume")?,
+            Command::UpdatePluginActivation => 
+                filesystem::plugin_activation_changed(tx, config).context("failed to update plugin activation")?,
         }
         Ok(ControlFlow::Continue(()))
     }
@@ -69,13 +86,19 @@ impl MessageSender {
     pub fn exit(&self) { self.send(Command::Exit) }
     pub fn update(&self) { self.send(Command::Update) }
 
-    pub fn playback(&self, playback: MediaPlayback) { self.send(Command::SetPlayback(playback)) }
-    pub fn metadata(&self, metadata: MediaMetadata) { self.send(Command::SetMetadata(metadata.into())) }
-    pub fn volume(&self, volume: f64) { self.send(Command::SetVolume(volume)) }
-    pub fn attach_as(&self, attached: bool) { self.send(Command::SetAttached(attached)) }
+    pub fn playback(&self, playback: MediaPlayback) { self.send(Command::Playback(playback)) }
+    pub fn metadata(&self, metadata: MediaMetadata) { self.send(Command::Metadata(metadata.into())) }
+    pub fn volume(&self, volume: f64) { self.send(Command::Volume(volume)) }
+    pub fn plugin_activated(&self, activated: bool) { self.send(Command::PluginActivated(activated)) }
+
+    pub fn attach_as(&self, attached: bool) { self.send(Command::Attached(attached)) }
     pub fn attach(&self) { self.attach_as(true); }
     pub fn detach(&self) { self.attach_as(false); }
-    pub fn plugin_activated(&self, activated: bool) { self.send(Command::PluginActivationUpdate(activated)) }
+
+    pub fn update_metadata(&self) { self.send(Command::UpdateMetadata); }
+    pub fn update_playback(&self) { self.send(Command::UpdatePlayback); }
+    pub fn update_volume(&self) { self.send(Command::UpdateVolume); }
+    pub fn update_plugin_activation(&self) { self.send(Command::UpdatePluginActivation); }
 }
 
 pub struct Messages { tx: MessageSender, rx: Receiver<Command> }
@@ -97,9 +120,12 @@ impl Messages {
     /// Listens to commands until [`Command::Exit`] is sent
     pub fn listen_until_exit(self, listener: &mut impl Listener, config: &Config) -> Result<()> {
         for command in self.rx {
-            if command.handle(listener, &self.tx, config)?.is_break() {
-                break;
-            }
+            let result = command.handle(listener, &self.tx, config)
+                .unwrap_or_else(|err| {
+                    error!("failed to handle command: {err:?}");
+                    ControlFlow::Continue(())
+                });
+            if result.is_break() { break; }
         }
         Ok(())
     }

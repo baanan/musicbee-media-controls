@@ -22,12 +22,34 @@ pub fn watch(
     let communication_directory = config.communication.directory.clone();
 
     // start watching the filesystem
-    let mut watcher = notify::recommended_watcher(move |event| {
-        handle_event(event, &message_sender, &config);
-    })?;
+    let mut watcher = notify::recommended_watcher(move |event| handle_event(event, &message_sender))?;
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)?;
 
     Ok(watcher)
+}
+
+fn handle_event(
+    event: notify::Result<Event>,
+    sender: &MessageSender,
+) {
+    let Ok(event) = event else { return };
+
+    if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
+        let file_names = event.paths.iter()
+            .map(Deref::deref)
+            .filter_map(Path::file_name)
+            .filter_map(OsStr::to_str);
+
+        for file_name in file_names {
+            match file_name {
+                METADATA_FILE => sender.update_metadata(),
+                PLAYBACK_FILE => sender.update_playback(),
+                VOLUME_FILE => sender.update_volume(),
+                PLUGIN_ACTIVATED_FILE => sender.update_plugin_activation(),
+                _ => {},
+            }
+        }
+    }
 }
 
 pub fn create_file_structure(config: &Config) -> io::Result<()> {
@@ -43,35 +65,6 @@ pub fn create_file_structure(config: &Config) -> io::Result<()> {
         .write(true).create(true).truncate(false)
         .open(config.get_comm_path(VOLUME_FILE))?;
     Ok(())
-}
-
-fn handle_event(
-    event: notify::Result<Event>,
-    sender: &MessageSender,
-    config: &Config,
-) {
-    let Ok(event) = event else { return };
-
-    if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
-        let file_names = event.paths.iter()
-            .map(Deref::deref)
-            .filter_map(Path::file_name)
-            .filter_map(OsStr::to_str);
-
-        for file_name in file_names {
-            match file_name {
-                METADATA_FILE => update_metadata(sender, config)
-                    .unwrap_or_else(|err| error!("failed to handle change in metadata: {err:?}")),
-                PLAYBACK_FILE => update_playback(sender, config)
-                    .unwrap_or_else(|err| error!("failed to handle change in playback: {err:?}")),
-                VOLUME_FILE => update_volume(sender, config)
-                    .unwrap_or_else(|err| error!("failed to handle change in volume: {err:?}")),
-                PLUGIN_ACTIVATED_FILE => plugin_activation_changed(sender, config)
-                    .unwrap_or_else(|err| error!("failed to handle change in plugin activation: {err:?}")),
-                _ => {},
-            }
-        }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -106,13 +99,13 @@ pub fn plugin_activation_changed(
 }
 
 pub fn update(sender: &MessageSender, config: &Config) -> Result<()> {
-    update_metadata(sender, config)?;
-    update_playback(sender, config)?;
-    update_volume(sender, config)?;
+    update_metadata(sender, config).context("failed to update metadata")?;
+    update_playback(sender, config).context("failed to update playback")?;
+    update_volume(sender, config).context("failed to update volume")?;
     Ok(())
 }
 
-fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
+pub fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
     let playback = config.read_comm_file(PLAYBACK_FILE)
         .context("failed to read the playback file")?;
 
@@ -147,7 +140,7 @@ fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
+pub fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
     let metadata = config.read_comm_file(METADATA_FILE)
         .context("failed to read the metadata file")?;
 
@@ -176,7 +169,7 @@ fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
     }
 }
 
-fn update_volume(sender: &MessageSender, config: &Config) -> Result<()> {
+pub fn update_volume(sender: &MessageSender, config: &Config) -> Result<()> {
     let volume = config.read_comm_file(VOLUME_FILE)
         .context("failed to read the volume file")?;
 
