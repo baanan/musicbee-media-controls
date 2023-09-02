@@ -46,11 +46,11 @@ impl Display for Action {
 }
 
 impl Action {
-    pub fn run(&self, config: &Config) -> io::Result<()> {
+    pub async fn run(&self, config: &Config) -> io::Result<()> {
         let action = self.to_string();
         debug!("running action: {action}");
 
-        config.write_comm_file(ACTION_FILE, &action)?;
+        config.write_comm_file(ACTION_FILE, &action).await?;
 
         trace!("notifying musicbee (volume down)");
 

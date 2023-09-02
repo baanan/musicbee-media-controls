@@ -1,4 +1,4 @@
-use std::{path::{PathBuf, Path}, fs, io, env, process::Command, fmt::{Display, Debug}, time::Duration};
+use std::{path::{PathBuf, Path}, env, process::Command, fmt::{Display, Debug}, time::Duration};
 
 use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
@@ -6,6 +6,7 @@ use ron::ser::PrettyConfig;
 use serde::{Serialize, Deserialize};
 use thiserror::Error;
 use anyhow::{Result, Context, Error};
+use tokio::{fs, io};
 
 use log::*;
 
@@ -217,12 +218,12 @@ impl Communication {
         PathBuf::from(format!("{}/{name}", self.directory))
     }
 
-    pub fn read_comm_file(&self, name: &str) -> io::Result<String> {
-        fs::read_to_string(self.get_comm_path(name))
+    pub async fn read_comm_file(&self, name: &str) -> io::Result<String> {
+        fs::read_to_string(self.get_comm_path(name)).await
     }
 
-    pub fn write_comm_file(&self, name: &str, contents: &str) -> io::Result<()> {
-        fs::write(self.get_comm_path(name), contents)
+    pub async fn write_comm_file(&self, name: &str, contents: &str) -> io::Result<()> {
+        fs::write(self.get_comm_path(name), contents).await
     }
 }
 
@@ -279,12 +280,12 @@ impl Config {
         self.communication.get_comm_path(name)
     }
 
-    pub fn read_comm_file(&self, name: &str) -> io::Result<String> {
-        self.communication.read_comm_file(name)
+    pub async fn read_comm_file(&self, name: &str) -> io::Result<String> {
+        self.communication.read_comm_file(name).await
     }
 
-    pub fn write_comm_file(&self, name: &str, contents: &str) -> io::Result<()> {
-        self.communication.write_comm_file(name, contents)
+    pub async fn write_comm_file(&self, name: &str, contents: &str) -> io::Result<()> {
+        self.communication.write_comm_file(name, contents).await
     }
 }
 
@@ -373,7 +374,7 @@ pub fn get(folder: &Path) -> Result<Config> {
     let file = folder.join(CONFIG_FILE);
     if !file.exists() { return Err(GetError::NotFound.into()); }
 
-    let contents = &fs::read_to_string(&file).context("failed to read config")?;
+    let contents = &std::fs::read_to_string(&file).context("failed to read config")?;
     ron::from_str::<Config>(contents).context("failed to parse config")
 }
 
@@ -383,10 +384,8 @@ pub fn save_default(folder: &Path) -> Result<Config> {
     let serialized = ron::ser::to_string_pretty(&config, PrettyConfig::new())
         .context("failed to serialize default config")?;
 
-    fs::create_dir_all(folder).and_then(|()|
-        fs::write(file, serialized)
-    )
-        .context("failed to save default config")?;
+    std::fs::create_dir_all(folder).context("failed to create config directory")?;
+    std::fs::write(file, serialized).context("failed to save default config")?;
 
     Ok(config)
 }

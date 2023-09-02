@@ -3,11 +3,15 @@
 use std::{sync::Arc, collections::HashMap, path::{Path, PathBuf}, time::{Instant, Duration}};
 
 use anyhow::{Result, anyhow, Context, bail};
+use async_trait::async_trait;
 use discord_rich_presence::{DiscordIpcClient, DiscordIpc, activity::{Activity, Assets}};
+use futures::future::join_all;
 use log::trace;
-use reqwest::blocking::{multipart::Form, Client};
+use reqwest::{multipart::{Form, Part}, Client, Body};
 use serde_json::Value;
 use souvlaki::MediaMetadata;
+use tokio::fs::File;
+use tokio_util::io::ReaderStream;
 use url::Url;
 
 use crate::config::Config;
@@ -35,14 +39,15 @@ impl Rpc {
     }
 }
 
+#[async_trait]
 impl Listener for Rpc {
-    fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
         if !self.attached { return Ok(()); }
 
         let MediaMetadata { title, album, artist, cover_url, .. } = metadata;
 
         let large_image = if let Some(cover_url) = cover_url {
-            self.cover_cache.resolve_str(cover_url)?.to_string()
+            self.cover_cache.resolve_str(cover_url).await?.to_string()
         } else {
             // TODO: config
             "https://www.getmusicbee.com/img/musicbee.png".to_string()
@@ -60,15 +65,15 @@ impl Listener for Rpc {
         Ok(())
     }
 
-    fn volume(&mut self, _volume: f64) -> Result<()> {
+    async fn volume(&mut self, _volume: f64) -> Result<()> {
         Ok(())
     }
 
-    fn playback(&mut self, _playback: &souvlaki::MediaPlayback) -> Result<()> {
+    async fn playback(&mut self, _playback: &souvlaki::MediaPlayback) -> Result<()> {
         Ok(())
     }
 
-    fn attach(&mut self) -> Result<()> {
+    async fn attach(&mut self) -> Result<()> {
         if !self.attached {
             self.client.connect()
                 .map_err(|err| anyhow!("failed to connect rpc: {err}"))?;
@@ -77,12 +82,12 @@ impl Listener for Rpc {
         Ok(())
     }
 
-    fn detach(&mut self) -> Result<()> {
+    async fn detach(&mut self) -> Result<()> {
         if self.attached {
             self.client.close()
                 .map_err(|err| anyhow!("failed to disconnect rpc: {err}"))?;
             self.attached = false;
-            self.cover_cache.clear()?;
+            self.cover_cache.clear().await?;
         }
         Ok(())
     }
@@ -131,12 +136,12 @@ impl CoverCache {
     }
 
     /// Uploads the file to a file provider, taking it from the cache if it exists
-    pub fn upload(&mut self, file: &Path) -> Result<Url> {
+    pub async fn upload(&mut self, file: &Path) -> Result<Url> {
         // get the cover from cache
         if let Some(url) = self.get(file) { return Ok(url); }
 
         // upload the file
-        let url = self.uploader.upload(file)?;
+        let url = self.uploader.upload(file).await?;
 
         // add it to the cache
         self.insert(file, &url);
@@ -149,11 +154,11 @@ impl CoverCache {
     /// Converts the url into a public url 
     ///
     /// This [uploads](Self::upload) the url it if it is a file
-    pub fn resolve(&mut self, url: Url) -> Result<Url> {
+    pub async fn resolve(&mut self, url: Url) -> Result<Url> {
         if url.scheme() == "file" {
             let path = url.to_file_path()
                 .map_err(|_| anyhow!("failed to convert file url to path"))?;
-            self.upload(&path)
+            self.upload(&path).await
         } else {
             Ok(url)
         }
@@ -162,18 +167,31 @@ impl CoverCache {
     /// Converts the url into a public url
     ///
     /// This [uploads](Self::upload) the url it if it is a file
-    pub fn resolve_str(&mut self, url: &str) -> Result<Url> {
-        self.resolve(Url::parse(url)?)
+    pub async fn resolve_str(&mut self, url: &str) -> Result<Url> {
+        self.resolve(Url::parse(url)?).await
     }
 
     /// Clears all items in the cache and deletes the images from the web
     ///
     /// For imgur, this is great, because it ensures that the images get deleted no matter what.
     /// For litterbox, this isn't, because the cache is removed
-    pub fn clear(&mut self) -> Result<()> {
+    pub async fn clear(&mut self) -> Result<()> {
         self.cached.clear();
-        self.uploader.wipe()
+        self.uploader.wipe().await
     }
+}
+
+pub async fn form_file(path: &Path) -> Result<Part> {
+    let file_name = path
+        .file_name()
+        .map(|val| val.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let file = File::open(&path).await.context("failed to open file")?;
+    let reader = Body::wrap_stream(ReaderStream::new(file));
+    let part = Part::stream(reader).file_name(file_name);
+
+    Ok(part)
 }
 
 pub enum Service {
@@ -190,6 +208,7 @@ impl Service {
     }
 }
 
+#[async_trait]
 trait UploadService {
     fn timeout(&self) -> Option<u64>;
     fn timeout_duration(&self) -> Option<Duration> {
@@ -197,8 +216,8 @@ trait UploadService {
     }
 
     // TODO: async
-    fn upload(&mut self, file: &Path) -> Result<Url>;
-    fn wipe(&mut self) -> Result<()> { Ok(()) }
+    async fn upload(&mut self, file: &Path) -> Result<Url>;
+    async fn wipe(&mut self) -> Result<()> { Ok(()) }
 }
 
 struct Litterbox;
@@ -208,23 +227,23 @@ impl Litterbox {
     const TIMEOUT: u64 = 1;
 }
 
+#[async_trait]
 impl UploadService for Litterbox {
     fn timeout(&self) -> Option<u64> { Some(Self::TIMEOUT) }
 
-    fn upload(&mut self, file: &Path) -> Result<Url> {
+    async fn upload(&mut self, file: &Path) -> Result<Url> {
         trace!("uploading cover `{}` to litterbox", file.display());
 
         let request = Form::new()
             .text("reqtype", "fileupload")
             .text("time", format!("{}h", Self::TIMEOUT)) // TODO: allow to be changed
-            .file("fileToUpload", file)
-                .context("failed to open cover file to upload to litterbox")?;
+            .part("fileToUpload", form_file(file).await.context("failed to open cover file to upload")?);
 
         let response = Client::new()
             .post(Self::API_URL)
             .multipart(request)
-            .send().context("failed to upload file to litterbox")?
-            .text().context("failed to get the text from the litterbox upload")?;
+            .send().await.context("failed to upload file to litterbox")?
+            .text().await.context("failed to get the text from the litterbox upload")?;
 
         let url = Url::parse(&response)
             .context("failed to parse url recieved from litterbox")?;
@@ -257,11 +276,12 @@ impl Imgur {
     }
 }
 
+#[async_trait]
 impl UploadService for Imgur {
     fn timeout(&self) -> Option<u64> { None }
 
-    fn upload(&mut self, file: &Path) -> Result<Url> {
-        let image = ImgurImage::upload(file)?;
+    async fn upload(&mut self, file: &Path) -> Result<Url> {
+        let image = ImgurImage::upload(file).await?;
         // this is a bit sloppy
         // not only does it require a clone, it also seperates the url from the image itself
         // so if the image list is cleared before it should be, the url could become invalid
@@ -270,10 +290,11 @@ impl UploadService for Imgur {
         Ok(url)
     }
 
-    fn wipe(&mut self) -> Result<()> {
-        // drops all images
-        // and thus deletes them
-        self.images.clear();
+    async fn wipe(&mut self) -> Result<()> {
+        let delete_all = self.images.drain(..) // take all images
+            .map(|image| image.delete()); // create futures to delete them
+        join_all(delete_all).await.into_iter() // join them all
+            .collect::<Result<()>>()?; // and fold the results into a single one
         Ok(())
     }
 }
@@ -285,16 +306,16 @@ struct ImgurImage {
 }
 
 impl ImgurImage {
-    pub fn upload(path: &Path) -> Result<Self> {
-        let request = Form::new().file("image", path)
-            .context("failed to open cover file to upload to imgur")?;
+    pub async fn upload(path: &Path) -> Result<Self> {
+        let request = Form::new()
+            .part("image", form_file(path).await.context("failed to open cover for upload")?);
 
         let response = Client::new()
             .post(Imgur::endpoint("upload"))
             .header("Authorization", format!("Client-ID {}", "0ce559de0c8a293"))
             .multipart(request)
-            .send().context("failed to upload file to imgur")?
-            .text().context("failed to get the text from the imgur upload")?;
+            .send().await.context("failed to upload file to imgur")?
+            .text().await.context("failed to get the text from the imgur upload")?;
 
         let json: Value = serde_json::from_str(&response)
             .context("failed to parse imgur upload response")?;
@@ -313,17 +334,21 @@ impl ImgurImage {
         Ok(Self { url, delete_hash })
     }
 
-    fn delete_inner(&mut self) -> Result<()> {
+    pub async fn delete(mut self) -> Result<()> {
+        self.delete_inner().await
+    }
+
+    async fn delete_inner(&mut self) -> Result<()> {
         Client::new()
             .delete(Imgur::endpoint_with_data("image", &self.delete_hash))
             .header("Authorization", format!("Client-ID {}", "0ce559de0c8a293"))
-            .send()?;
+            .send().await?;
         Ok(())
     }
 }
 
 impl Drop for ImgurImage {
     fn drop(&mut self) {
-        self.delete_inner().expect("failed to delete imgur image");
+        futures::executor::block_on(self.delete_inner()).expect("failed to delete imgur image");
     }
 }

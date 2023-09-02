@@ -13,15 +13,18 @@ mod daemon;
 mod listener;
 mod messages;
 
+use std::time::Duration;
+
 use clap::Parser;
 use cli::{Cli, Commands};
-use config::Config;
 // cargo is too dumb to realize that it's being used out of debug
 #[allow(unused_imports)]
 use daemonize::Daemonize;
 use directories::ProjectDirs;
+use futures::Future;
 use log::*;
 use anyhow::*;
+use tokio::runtime::Runtime;
 
 #[must_use]
 fn project_dirs() -> Option<ProjectDirs> {
@@ -37,7 +40,7 @@ fn main() -> Result<()> {
         .context("failed to create the communication file structure")?;
 
     match cli.command {
-        Commands::Run { .. } => run(config, &cli.command, config_err)?,
+        Commands::Run { run_config } => daemon::run(config, &run_config, config_err)?,
         Commands::End => 
             daemon::end(&config, true).context("failed to end daemon")?,
         Commands::ConfigFile { open: false } => 
@@ -49,28 +52,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run(config: Config, command: &Commands, outstanding_error: Option<Error>) -> Result<()> {
-    let Commands::Run { force, detach, tray, replace } = command else {
-        panic!("expected command to be a Commands::Run");
-    };
-
-    logger::init(&config)
-        .context("failed to start logging")?;
-
-    // if the config originally failed to parse, notify the user
-    if let Some(outstanding_error) = outstanding_error {
-        error!("failed to parse config, got: {outstanding_error}. Returned to defaults");
-    }
-
-    if *replace { 
-        daemon::end(&config, false).context("failed to replace previous daemon")?; 
-    }
-
-    if *force {
-        daemon::create(config, *detach, *tray).context("failed to forcibly start daemon")?;
-    } else {
-        daemon::run(config, *detach, *tray).context("failed to start daemon")?;
-    }
-
-    Ok(())
+// async is run later in daemon::run because daemonize breaks async
+fn run_async(function: impl Future<Output = Result<()>>) -> Result<()> {
+    let rt = Runtime::new().unwrap();
+    let res = rt.block_on(function);
+    rt.shutdown_timeout(Duration::from_secs(1));
+    res
 }

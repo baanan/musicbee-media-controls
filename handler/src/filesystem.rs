@@ -21,7 +21,6 @@ pub fn watch(
 ) -> Result<RecommendedWatcher> {
     let communication_directory = config.communication.directory.clone();
 
-    // start watching the filesystem
     let mut watcher = notify::recommended_watcher(move |event| handle_event(event, &message_sender))?;
     watcher.watch(Path::new(&communication_directory), RecursiveMode::NonRecursive)?;
 
@@ -42,10 +41,10 @@ fn handle_event(
 
         for file_name in file_names {
             match file_name {
-                METADATA_FILE => sender.update_metadata(),
-                PLAYBACK_FILE => sender.update_playback(),
-                VOLUME_FILE => sender.update_volume(),
-                PLUGIN_ACTIVATED_FILE => sender.update_plugin_activation(),
+                METADATA_FILE => sender.blocking_update_metadata(),
+                PLAYBACK_FILE => sender.blocking_update_playback(),
+                VOLUME_FILE => sender.blocking_update_volume(),
+                PLUGIN_ACTIVATED_FILE => sender.blocking_update_plugin_activation(),
                 _ => {},
             }
         }
@@ -64,6 +63,9 @@ pub fn create_file_structure(config: &Config) -> io::Result<()> {
     OpenOptions::new()
         .write(true).create(true).truncate(false)
         .open(config.get_comm_path(VOLUME_FILE))?;
+    OpenOptions::new()
+        .write(true).create(true).truncate(false)
+        .open(config.get_comm_path(PLUGIN_ACTIVATED_FILE))?;
     Ok(())
 }
 
@@ -77,8 +79,8 @@ pub enum MalformedFile {
     Volume(String),
 }
 
-pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
-    let text = config.read_comm_file(PLUGIN_ACTIVATED_FILE)
+pub async fn plugin_available(config: &Config) -> Result<Option<bool>> {
+    let text = config.read_comm_file(PLUGIN_ACTIVATED_FILE).await
         .context("failed to read plugin availability")?;
 
     // empty files are normal when they're being created
@@ -88,25 +90,30 @@ pub fn plugin_available(config: &Config) -> Result<Option<bool>> {
 }
 
 #[allow(unused_variables)] // TODO: todo
-pub fn plugin_activation_changed(
+pub async fn plugin_activation_changed(
     sender: &MessageSender,
     config: &Config,
 ) -> Result<()> {
-    if let Some(activated) = plugin_available(config)? {
-        sender.plugin_activated(activated);
+    if let Some(activated) = plugin_available(config).await? {
+        sender.plugin_activated(activated).await;
     }
     Ok(())
 }
 
-pub fn update(sender: &MessageSender, config: &Config) -> Result<()> {
-    update_metadata(sender, config).context("failed to update metadata")?;
-    update_playback(sender, config).context("failed to update playback")?;
-    update_volume(sender, config).context("failed to update volume")?;
+pub async fn update(sender: &MessageSender, config: &Config) -> Result<()> {
+    let (metadata, playback, volume) = futures::join!(
+        update_metadata(sender, config),
+        update_playback(sender, config),
+        update_volume(sender, config),
+    );
+    metadata.context("failed to update metadata")?;
+    playback.context("failed to update playback")?;
+    volume.context("failed to update volume")?;
     Ok(())
 }
 
-pub fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
-    let playback = config.read_comm_file(PLAYBACK_FILE)
+pub async fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
+    let playback = config.read_comm_file(PLAYBACK_FILE).await
         .context("failed to read the playback file")?;
 
     // empty files are normal when they're being created
@@ -133,15 +140,15 @@ pub fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
             }
         };
 
-        sender.playback(playback);
+        sender.playback(playback).await;
     } else {
         return Err(MalformedFile::Playback(playback.trim().to_owned()))?;
     }
     Ok(())
 }
 
-pub fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
-    let metadata = config.read_comm_file(METADATA_FILE)
+pub async fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
+    let metadata = config.read_comm_file(METADATA_FILE).await
         .context("failed to read the metadata file")?;
 
     // empty files are normal when they're being created
@@ -162,15 +169,15 @@ pub fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
                 artist: Some(artist),
                 cover_url: map_cover(cover_url, config, artist, title).as_deref(),
                 duration: Some(duration),
-            });
+            }).await;
         Ok(())
     } else {
         Err(MalformedFile::Metadata(metadata))?
     }
 }
 
-pub fn update_volume(sender: &MessageSender, config: &Config) -> Result<()> {
-    let volume = config.read_comm_file(VOLUME_FILE)
+pub async fn update_volume(sender: &MessageSender, config: &Config) -> Result<()> {
+    let volume = config.read_comm_file(VOLUME_FILE).await
         .context("failed to read the volume file")?;
 
     // empty files are normal when they're being created
@@ -179,7 +186,7 @@ pub fn update_volume(sender: &MessageSender, config: &Config) -> Result<()> {
     let volume: f64 = volume.trim().parse()
         .map_err(|_| MalformedFile::Volume(volume))?;
 
-    sender.volume(volume);
+    sender.volume(volume).await;
 
     Ok(())
 }

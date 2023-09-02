@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ArgAction};
+use clap::{Parser, Subcommand, ArgAction, Args};
 
 use crate::config;
 
@@ -39,18 +39,8 @@ fn default_config_path() -> PathBuf {
 pub enum Commands {
     /// Run the daemon
     Run {
-        /// Force the daemon to start without checking if one already exists
-        #[arg(short, long)]
-        force: bool,
-        /// Don't detach the daemon from the terminal when created
-        #[arg(short = 'd', long = "no-detach", default_value_t = true, action = ArgAction::SetFalse)]
-        detach: bool,
-        /// Don't create a tray item
-        #[arg(short = 't', long = "no-tray", default_value_t = true, action = ArgAction::SetFalse)]
-        tray: bool,
-        /// Don't automatically replace any current daemon if it exists
-        #[arg(short = 'r', long = "no-replace", default_value_t = true, action = ArgAction::SetFalse)]
-        replace: bool,
+        #[command(flatten)]
+        run_config: RunConfig,
     },
     /// End the daemon
     End,
@@ -60,4 +50,20 @@ pub enum Commands {
         #[arg(short, long)]
         open: bool,
     },
+}
+
+#[derive(Args)]
+pub struct RunConfig {
+    /// Force the daemon to start without checking if one already exists
+    #[arg(short, long)]
+    pub force: bool,
+    /// Don't detach the daemon from the terminal when created
+    #[arg(short = 'd', long = "no-detach", default_value_t = true, action = ArgAction::SetFalse)]
+    pub detach: bool,
+    /// Don't create a tray item
+    #[arg(short = 't', long = "no-tray", default_value_t = true, action = ArgAction::SetFalse)]
+    pub tray: bool,
+    /// Don't automatically replace any current daemon if it exists
+    #[arg(short = 'r', long = "no-replace", default_value_t = true, action = ArgAction::SetFalse)]
+    pub replace: bool,
 }

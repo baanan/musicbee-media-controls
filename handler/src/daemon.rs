@@ -1,10 +1,10 @@
 use std::{path::{PathBuf, Path}, sync::Arc, fs, thread, time::Duration};
 
 use daemonize::Daemonize;
-use anyhow::{Result, Context, bail};
+use anyhow::{Result, Context, bail, Error};
 use log::{error, debug, trace};
 
-use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Listener}, filesystem, tray, messages::Messages};
+use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Listener}, filesystem, tray, messages::Messages, cli::RunConfig, logger};
 
 pub fn pid_file(config: &Config) -> PathBuf {
     crate::project_dirs().and_then(|directories| directories.runtime_dir().map(Path::to_owned))
@@ -26,13 +26,6 @@ pub fn remove_pid(config: &Config) -> Result<()> {
         fs::remove_file(file)?;
     }
     Ok(())
-}
-
-pub fn run(config: Config, detach: bool, tray: bool) -> Result<()> {
-    if let Some(pid) = get_pid(&config)? {
-        bail!("deamon is already running with pid {pid}, use --force to ignore, or omit --no-replace to replace")
-    }
-    create(config, detach, tray)
 }
 
 pub fn end(config: &Config, force: bool) -> Result<()> {
@@ -63,16 +56,41 @@ pub fn init_pid_dir(config: &Config) -> Result<()> {
     Ok(())
 }
 
+pub fn run(config: Config, run_config: &RunConfig, outstanding_error: Option<Error>) -> Result<()> {
+    let RunConfig { force, detach, tray, replace } = run_config;
 
-pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
-    // -- setup -- //
+    logger::init(&config)
+        .context("failed to start logging")?;
 
-    if detach {
+    // if the config originally failed to parse, notify the user
+    if let Some(outstanding_error) = outstanding_error {
+        error!("failed to parse config, got: {outstanding_error}. Returned to defaults");
+    }
+
+    if *replace { 
+        end(&config, false).context("failed to replace previous daemon")?; 
+    }
+
+    if *force {
+        if let Some(pid) = get_pid(&config)? {
+            bail!("deamon is already running with pid {pid}, use --force to ignore, or omit --no-replace to replace")
+        }
+    } 
+
+    if *detach {
         init_pid_dir(&config)?;
         Daemonize::new()
             .pid_file(pid_file(&config))
             .start().context("failed to start daemon")?;
     }
+
+    crate::run_async(create(config, *tray)).context("failed to start daemon")?;
+
+    Ok(())
+}
+
+async fn create(config: Config, tray: bool) -> Result<()> {
+    // -- setup -- //
 
     // share config
     let config = Arc::new(config);
@@ -82,7 +100,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
 
     {
         let tx = messages.sender();
-        ctrlc::set_handler(move || tx.exit())
+        ctrlc::set_handler(move || tx.blocking_exit())
             .context("failed to set termination interupt")?;
     }
 
@@ -91,7 +109,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
 
     // media controls
     if config.media_controls.enabled {
-        let controls = Controls::new(config.clone())
+        let controls = Controls::new(messages.sender())
             .context("failed to initialize the media controls")?;
         listeners.add(controls);
     }
@@ -121,12 +139,12 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // -- running -- //
 
     // get initial values by queueing up an update
-    if filesystem::plugin_available(&config)?.unwrap_or(false) { 
-        messages.sender().update(); 
+    if filesystem::plugin_available(&config).await?.unwrap_or(false) { 
+        messages.sender().update().await; 
     }
 
     // start listening to messages
-    messages.listen_until_exit(&mut listeners, &config)?;
+    messages.listen_until_exit(&mut listeners, config.clone()).await?;
 
     // -- cleanup -- //
 
@@ -146,7 +164,7 @@ pub fn create(config: Config, detach: bool, tray: bool) -> Result<()> {
     // Detach the listeners at the end
     // this isn't necessary for the media controls,
     // but it is for rpc
-    listeners.detach()
+    listeners.detach().await
         .context("failed to finally detach everything")?;
 
     trace!("listeners have detached");

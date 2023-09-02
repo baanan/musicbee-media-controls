@@ -1,13 +1,14 @@
 #![allow(clippy::similar_names)]
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use anyhow::{Result, Context};
+use async_trait::async_trait;
 use log::*;
 use souvlaki::*;
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, communication::Action};
+use crate::{config::Config, communication::Action, messages::{MessageSender, Command}};
 
 use super::Listener;
 
@@ -31,13 +32,13 @@ pub type ControlsResult<T> = Result<T, ControlsError>;
 
 pub struct Controls {
     controls: MediaControls,
-    config: Arc<Config>,
+    sender: MessageSender,
     attached: bool,
 }
 
 impl Controls {
     /// Creates new, unattached media controls
-    pub fn new(config: Arc<Config>) -> ControlsResult<Self> {
+    pub fn new(sender: MessageSender) -> ControlsResult<Self> {
         let platform = PlatformConfig {
             dbus_name: "com.github.baanan.musicbee_linux",
             display_name: "MusicBee",
@@ -48,31 +49,31 @@ impl Controls {
 
         Ok(Self {
             controls,
-            config,
+            sender,
             attached: false,
         })
     }
 }
 
+#[async_trait]
 impl Listener for Controls {
     /// Attaches media controls to a handler
-    fn attach(&mut self) -> Result<()> {
+    async fn attach(&mut self) -> Result<()> {
         if self.attached {
             return Err(ControlsError::AlreadyAttached)?;
         }
 
-        let config = self.config.clone();
-        self.controls.attach(move |event| 
-            handle_event(event, &config)
-                .unwrap_or_else(|err| error!("failed to handle event: {err}"))
-        ).map_err(ControlsError::from)?;
+        let sender = self.sender.clone();
+        self.controls
+            .attach(move |event| sender.blocking_send(Command::MediaControlEvent(event)))
+            .map_err(ControlsError::from)?;
         self.attached = true;
 
         Ok(())
     }
 
     /// Detatches the media controls from a handler
-    fn detach(&mut self) -> Result<()> {
+    async fn detach(&mut self) -> Result<()> {
         if !self.attached {
             return Err(ControlsError::AlreadyDetached)?;
         }
@@ -84,7 +85,7 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the metadata of the controls
-    fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
         if self.attached { 
             self.controls.set_metadata(metadata.clone()).map_err(ControlsError::from)?; 
         }
@@ -92,7 +93,7 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the volume of the controls
-    fn volume(&mut self, volume: f64) -> Result<()> {
+    async fn volume(&mut self, volume: f64) -> Result<()> {
         if self.attached { 
             self.controls.set_volume(volume).map_err(ControlsError::from)?;
         }
@@ -100,7 +101,7 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the playback of the controls
-    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
+    async fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
         if self.attached { 
             self.controls.set_playback(playback.clone()).map_err(ControlsError::from)?; 
         }
@@ -110,7 +111,7 @@ impl Listener for Controls {
     fn attached(&self) -> bool { self.attached }
 }
 
-fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
+pub async fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
     #[allow(clippy::enum_glob_use)]
     use MediaControlEvent::*;
     debug!("Recieved control event: {event:?}");
@@ -121,11 +122,11 @@ fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
         Stop => config.run_simple_command("/Stop")?,
         OpenUri(uri) => config.run_command("/Play", Some(map_uri(uri)))?,
         Seek(direction) => directioned_duration_to_seek(direction, config.media_controls.seek_amount)?
-            .run(config)?,
+            .run(config).await?,
         SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration)?
-            .run(config)?,
-        SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config)?,
-        SetVolume(vol) => if config.media_controls.send_volume { Action::Volume(vol).run(config)? },
+            .run(config).await?,
+        SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config).await?,
+        SetVolume(vol) => if config.media_controls.send_volume { Action::Volume(vol).run(config).await? },
         _ => { error!("Event {event:?} not implemented") } // TODO: implement other events
     }
     Ok(())

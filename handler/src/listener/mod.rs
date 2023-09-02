@@ -1,26 +1,30 @@
 
 use anyhow::Result;
 
+use async_trait::async_trait;
+use futures::{future::join_all, Future};
 use log::{trace, debug};
 use souvlaki::{MediaMetadata, MediaPlayback};
+use futures::FutureExt;
 
 pub mod media_controls;
 pub mod rpc;
 
+#[async_trait]
 pub trait Listener {
     /// Called when the metadata is updated
     ///
     /// The `metadata`'s cover is guaranteed to be a valid [`Url`](url::Url)
-    fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()>;
+    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()>;
     /// Called when the volume is updated
-    fn volume(&mut self, volume: f64) -> Result<()>;
+    async fn volume(&mut self, volume: f64) -> Result<()>;
     /// Called when the playback is updated
-    fn playback(&mut self, playback: &MediaPlayback) -> Result<()>;
+    async fn playback(&mut self, playback: &MediaPlayback) -> Result<()>;
 
     /// Attach / resume the listener
-    fn attach(&mut self) -> Result<()>;
+    async fn attach(&mut self) -> Result<()>;
     /// Detach / pause the listener
-    fn detach(&mut self) -> Result<()>;
+    async fn detach(&mut self) -> Result<()>;
 
     fn attached(&self) -> bool;
 }
@@ -36,47 +40,55 @@ impl List {
     pub fn add(&mut self, listener: impl Listener + Send + 'static) {
         self.listeners.push(Box::new(listener));
     }
+
+    async fn update_all<'a, Fut, F>(&'a mut self, func: F) -> Result<()> 
+    where 
+        F: Fn(&'a mut Box<dyn Listener + Send>) -> Fut,
+        Fut: Future<Output = Result<()>> + 'a
+    {
+        let updates = self.listeners.iter_mut()
+            .map(func);
+        join_all(updates).await.into_iter()
+            .collect::<Result<()>>()?;
+        Ok(())
+    }
 }
 
+#[async_trait]
 impl Listener for List {
-    fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
         debug!("updating metadata: {} - {}", metadata.artist.unwrap_or_default(), metadata.title.unwrap_or_default());
-        for listener in &mut self.listeners {
-            listener.metadata(metadata)?;
-        }
-        Ok(())
+        self.update_all(|listener| listener.metadata(metadata)).await
     }
 
-    fn volume(&mut self, volume: f64) -> Result<()> {
+    async fn volume(&mut self, volume: f64) -> Result<()> {
         debug!("updating volume: {volume}");
-        for listener in &mut self.listeners {
-            listener.volume(volume)?;
-        }
-        Ok(())
+        self.update_all(|listener| listener.volume(volume)).await
     }
 
-    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
+    async fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
         debug!("updating playback: {}", display_playback(playback));
-        for listener in &mut self.listeners {
-            listener.playback(playback)?;
-        }
-        Ok(())
+        self.update_all(|listener| listener.playback(playback)).await
     }
 
-    fn attach(&mut self) -> Result<()> {
+    async fn attach(&mut self) -> Result<()> {
         trace!("Attaching");
-        for listener in &mut self.listeners {
-            if !listener.attached() { listener.attach()?; }
-        }
-        Ok(())
+        self.update_all(|listener| { 
+            if !listener.attached() { 
+                return listener.attach();
+            }
+            futures::future::ready(Ok(())).boxed()
+        }).await
     }
 
-    fn detach(&mut self) -> Result<()> {
+    async fn detach(&mut self) -> Result<()> {
         trace!("Detaching");
-        for listener in &mut self.listeners {
-            if listener.attached() { listener.detach()?; }
-        }
-        Ok(())
+        self.update_all(|listener| { 
+            if listener.attached() { 
+                return listener.detach();
+            }
+            futures::future::ready(Ok(())).boxed()
+        }).await
     }
 
     fn attached(&self) -> bool {

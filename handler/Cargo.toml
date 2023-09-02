@@ -9,37 +9,44 @@ authors=["baanan"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# most important parts
+# filesystem
+notify = "5.1.0"
+# daemon / command line
+daemonize = "0.5.0"
+clap = { version = "4.3.19", features = ["derive"] }
+ctrlc = { version = "3.4.0", features = ["termination"] }
+# media
 ## zbus is significantly faster for me
 souvlaki = { git = "https://github.com/Sinono3/souvlaki", branch = "volume", default-features = false, features = ["use_zbus"] }
-# souvlaki = { path = "../../souvlaki", default-features = false, features = ["use_zbus"] }
-notify = "5.1.0"
+# rpc
+discord-rich-presence = "0.2.3"
+reqwest = { version = "0.11.18", features = ["multipart", "stream"] }
+serde_json = "1.0.104"
+# tray
 tray-item = { version = "0.8.0", features = ["libappindicator"] }
+gtk = "0.15"
+gio = "0.15"
+glib = "0.15"
+# config
+serde = "1.0.160"
+ron = "0.8.0"
+aho-corasick = "1.0.1"
+lazy_static = "1.4.0"
+dirs = "5.0.0"
+directories = "5.0.1"
+# async
+async-trait = "0.1.72"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3.28"
+tokio-stream = "0.1.14"
 # utilities
-daemonize = "0.5.0"
 log = "0.4.0"
 env_logger = "0.9.0"
 open = "3"
 url = "2.3.1"
-gtk = "0.15"
-gio = "0.15"
-glib = "0.15"
-serde = "1.0.160"
-dirs = "5.0.0"
-ron = "0.8.0"
-aho-corasick = "1.0.1"
-lazy_static = "1.4.0"
-png = "0.16.8"
 thiserror = "1.0.44"
-clap = { version = "4.3.19", features = ["derive"] }
 anyhow = "1.0.72"
-directories = "5.0.1"
-discord-rich-presence = "0.2.3"
-reqwest = { version = "0.11.18", features = ["blocking", "multipart"] }
-serde_json = "1.0.104"
-pollster = "0.3.0"
-async-trait = "0.1.72"
-ctrlc = { version = "3.4.0", features = ["termination"] }
+tokio-util = { version = "0.7.8", features = ["io"] }
 
 [build-dependencies]
 dirs = "5.0.0"
