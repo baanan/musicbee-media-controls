@@ -95,19 +95,8 @@ impl Listener for Rpc {
     fn attached(&self) -> bool { self.attached }
 }
 
-struct UploadedFile {
-    time: Instant,
-    url: Url,
-}
-
-impl UploadedFile {
-    pub fn new(url: Url) -> Self {
-        Self { url, time: Instant::now() }
-    }
-}
-
 struct CoverCache {
-    cached: HashMap<PathBuf, UploadedFile>,
+    cached: HashMap<PathBuf, Box<dyn UploadedFile + Send>>,
     uploader: Box<dyn UploadService + Send>,
 }
 
@@ -117,22 +106,15 @@ impl CoverCache {
     }
 
     /// Inserts a url for file
-    fn insert(&mut self, file: &Path, url: &Url) {
-        let uploaded = UploadedFile::new(url.clone());
+    fn insert(&mut self, file: &Path, uploaded: Box<dyn UploadedFile + Send>) {
         self.cached.insert(file.to_path_buf(), uploaded);
     }
 
     fn get(&mut self, file: &Path) -> Option<Url> {
         // get from cache
-        let Some(UploadedFile { time, url }) = self.cached.get(file) else { return None; };
-        // check timeout if it exists
-        if self.uploader.timeout_duration().is_some_and(|duration|
-            Instant::now().duration_since(*time) > duration 
-        ) { return None; }
-
+        let file = self.cached.get(file)?.url()?;
         trace!("successfully found cover in cache");
-
-        Some(url.clone())
+        Some(file)
     }
 
     /// Uploads the file to a file provider, taking it from the cache if it exists
@@ -141,10 +123,13 @@ impl CoverCache {
         if let Some(url) = self.get(file) { return Ok(url); }
 
         // upload the file
-        let url = self.uploader.upload(file).await?;
+        let uploaded = self.uploader.upload(file).await?;
+
+        // get the url
+        let url = uploaded.url().expect("uploaded files must have a url after being created");
 
         // add it to the cache
-        self.insert(file, &url);
+        self.insert(file, uploaded);
 
         trace!("cover uploaded to {url}");
 
@@ -176,8 +161,14 @@ impl CoverCache {
     /// For imgur, this is great, because it ensures that the images get deleted no matter what.
     /// For litterbox, this isn't, because the cache is removed
     pub async fn clear(&mut self) -> Result<()> {
-        self.cached.clear();
-        self.uploader.wipe().await
+        let images = self.cached.drain();
+        if self.uploader.needs_deleting() {
+            let delete_all = images.map(|(_, file)| file) // take all images
+                .map(|image| image.delete()); // create futures to delete them
+            join_all(delete_all).await.into_iter() // join them all
+                .collect::<Result<()>>()?; // and fold the results into a single one
+        }
+        Ok(())
     }
 }
 
@@ -203,21 +194,25 @@ impl Service {
     fn create(&self) -> Box<dyn UploadService + Send> {
         match self {
             Self::Litterbox => Box::new(Litterbox),
-            Self::Imgur => Box::new(Imgur::new())
+            Self::Imgur => Box::new(Imgur)
         }
     }
 }
 
 #[async_trait]
 trait UploadService {
-    fn timeout(&self) -> Option<u64>;
-    fn timeout_duration(&self) -> Option<Duration> {
-        self.timeout().map(|hours| Duration::from_secs(hours * 60 * 60))
-    }
+    /// Uploads the file to the upload service
+    async fn upload(&mut self, file: &Path) -> Result<Box<dyn UploadedFile + Send>>;
+    /// Do the uploaded files from this service need to be deleted
+    fn needs_deleting(&self) -> bool;
+}
 
-    // TODO: async
-    async fn upload(&mut self, file: &Path) -> Result<Url>;
-    async fn wipe(&mut self) -> Result<()> { Ok(()) }
+#[async_trait]
+trait UploadedFile {
+    /// Returns the url of the image or None if the image is invalid
+    fn url(&self) -> Option<Url>;
+    /// Deletes the image
+    async fn delete(self: Box<Self>) -> Result<()>;
 }
 
 struct Litterbox;
@@ -229,18 +224,39 @@ impl Litterbox {
 
 #[async_trait]
 impl UploadService for Litterbox {
-    fn timeout(&self) -> Option<u64> { Some(Self::TIMEOUT) }
+    async fn upload(&mut self, file: &Path) -> Result<Box<dyn UploadedFile + Send>> {
+        Ok(Box::new(LitterboxImage::upload(file).await?))
+    }
 
-    async fn upload(&mut self, file: &Path) -> Result<Url> {
+    fn needs_deleting(&self) -> bool { false }
+}
+
+struct LitterboxImage {
+    url: Url,
+    time: Instant,
+}
+
+#[async_trait]
+impl UploadedFile for LitterboxImage {
+    fn url(&self) -> Option<Url> {
+        let in_time = Instant::now().duration_since(self.time) < Duration::from_secs(Litterbox::TIMEOUT * 60 * 60);
+        in_time.then(|| self.url.clone())
+    }
+
+    async fn delete(self: Box<Self>) -> Result<()> { Ok(()) }
+}
+
+impl LitterboxImage {
+    async fn upload(file: &Path) -> Result<Self> {
         trace!("uploading cover `{}` to litterbox", file.display());
 
         let request = Form::new()
             .text("reqtype", "fileupload")
-            .text("time", format!("{}h", Self::TIMEOUT)) // TODO: allow to be changed
+            .text("time", format!("{}h", Litterbox::TIMEOUT)) // TODO: allow to be changed
             .part("fileToUpload", form_file(file).await.context("failed to open cover file to upload")?);
 
         let response = Client::new()
-            .post(Self::API_URL)
+            .post(Litterbox::API_URL)
             .multipart(request)
             .send().await.context("failed to upload file to litterbox")?
             .text().await.context("failed to get the text from the litterbox upload")?;
@@ -248,22 +264,14 @@ impl UploadService for Litterbox {
         let url = Url::parse(&response)
             .context("failed to parse url recieved from litterbox")?;
 
-        Ok(url)
+        Ok(Self { url, time: Instant::now() })
     }
 }
 
-struct Imgur {
-    // list of images
-    // so drop knows what to remove
-    images: Vec<ImgurImage>,
-}
+struct Imgur;
 
 impl Imgur {
     const API_URL: &str = "https://api.imgur.com/3/";
-
-    pub const fn new() -> Self {
-        Self { images: vec![] }
-    }
 
     fn endpoint(endpoint: &str) -> Url {
         Url::parse(Self::API_URL).expect("api url is a valid url")
@@ -278,31 +286,28 @@ impl Imgur {
 
 #[async_trait]
 impl UploadService for Imgur {
-    fn timeout(&self) -> Option<u64> { None }
-
-    async fn upload(&mut self, file: &Path) -> Result<Url> {
-        let image = ImgurImage::upload(file).await?;
-        // this is a bit sloppy
-        // not only does it require a clone, it also seperates the url from the image itself
-        // so if the image list is cleared before it should be, the url could become invalid
-        let url = image.url.clone();
-        self.images.push(image);
-        Ok(url)
+    async fn upload(&mut self, file: &Path) -> Result<Box<dyn UploadedFile + Send>> {
+        Ok(Box::new(ImgurImage::upload(file).await?))
     }
 
-    async fn wipe(&mut self) -> Result<()> {
-        let delete_all = self.images.drain(..) // take all images
-            .map(|image| image.delete()); // create futures to delete them
-        join_all(delete_all).await.into_iter() // join them all
-            .collect::<Result<()>>()?; // and fold the results into a single one
-        Ok(())
-    }
+    fn needs_deleting(&self) -> bool { true }
 }
 
 #[derive(Debug)]
 struct ImgurImage {
-    url: Url,
+    url: Option<Url>,
     delete_hash: String,
+}
+
+#[async_trait]
+impl UploadedFile for ImgurImage {
+    fn url(&self) -> Option<Url> {
+        self.url.as_ref().cloned()
+    }
+
+    async fn delete(mut self: Box<Self>) -> Result<()> {
+        self.delete_inner().await
+    }
 }
 
 impl ImgurImage {
@@ -331,11 +336,7 @@ impl ImgurImage {
         let delete_hash = json["data"]["deletehash"].as_str()
             .context("failed to get delete hash for imgur upload")?
             .to_string();
-        Ok(Self { url, delete_hash })
-    }
-
-    pub async fn delete(mut self) -> Result<()> {
-        self.delete_inner().await
+        Ok(Self { url: Some(url), delete_hash })
     }
 
     async fn delete_inner(&mut self) -> Result<()> {
@@ -343,6 +344,7 @@ impl ImgurImage {
             .delete(Imgur::endpoint_with_data("image", &self.delete_hash))
             .header("Authorization", format!("Client-ID {}", "0ce559de0c8a293"))
             .send().await?;
+        self.url.take();
         Ok(())
     }
 }
