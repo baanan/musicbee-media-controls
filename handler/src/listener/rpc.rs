@@ -33,7 +33,7 @@ impl Rpc {
         let client = DiscordIpcClient::new("942300665726767144")
             .expect("failed to create discord ipc client");
 
-        let cover_cache = CoverCache::with(&Service::Imgur);
+        let cover_cache = CoverCache::with(&Service::Litterbox);
 
         Self { client, config, cover_cache, attached: false }
     }
@@ -219,7 +219,7 @@ struct Litterbox;
 
 impl Litterbox {
     const API_URL: &str = "https://litterbox.catbox.moe/resources/internals/api.php";
-    const TIMEOUT: u64 = 1;
+    const TIMEOUT: u64 = 12;
 }
 
 #[async_trait]
@@ -239,6 +239,9 @@ struct LitterboxImage {
 #[async_trait]
 impl UploadedFile for LitterboxImage {
     fn url(&self) -> Option<Url> {
+        // check if the image is too old
+        // technically this could break if a song starts playing near the end of the timeout,
+        // but the timeout is already so large that that's probably fine
         let in_time = Instant::now().duration_since(self.time) < Duration::from_secs(Litterbox::TIMEOUT * 60 * 60);
         in_time.then(|| self.url.clone())
     }
@@ -248,8 +251,6 @@ impl UploadedFile for LitterboxImage {
 
 impl LitterboxImage {
     async fn upload(file: &Path) -> Result<Self> {
-        trace!("uploading cover `{}` to litterbox", file.display());
-
         let request = Form::new()
             .text("reqtype", "fileupload")
             .text("time", format!("{}h", Litterbox::TIMEOUT)) // TODO: allow to be changed
@@ -296,6 +297,9 @@ impl UploadService for Imgur {
 #[derive(Debug)]
 struct ImgurImage {
     url: Option<Url>,
+    // it would be best to have the delete hash also under an option (well more the entire struct)
+    // in order to ensure that nothing can access the image after it's been deleted
+    // but that's just unnecessary compexity at that point
     delete_hash: String,
 }
 
@@ -344,6 +348,7 @@ impl ImgurImage {
             .delete(Imgur::endpoint_with_data("image", &self.delete_hash))
             .header("Authorization", format!("Client-ID {}", "0ce559de0c8a293"))
             .send().await?;
+        // make sure that the url can't be used anymore
         self.url.take();
         Ok(())
     }
