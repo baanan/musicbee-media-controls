@@ -142,7 +142,7 @@ impl CoverCache {
     pub async fn resolve(&mut self, url: Url) -> Result<Url> {
         if url.scheme() == "file" {
             let path = url.to_file_path()
-                .map_err(|_| anyhow!("failed to convert file url to path"))?;
+                .map_err(|_| anyhow!("failed to convert file url '{url}' to path"))?;
             self.upload(&path).await
         } else {
             Ok(url)
@@ -254,16 +254,17 @@ impl LitterboxImage {
         let request = Form::new()
             .text("reqtype", "fileupload")
             .text("time", format!("{}h", Litterbox::TIMEOUT)) // TODO: allow to be changed
-            .part("fileToUpload", form_file(file).await.context("failed to open cover file to upload")?);
+            .part("fileToUpload", form_file(file).await
+                .context(format!("failed to open cover file '{}' to upload", file.display()))?);
 
         let response = Client::new()
             .post(Litterbox::API_URL)
             .multipart(request)
-            .send().await.context("failed to upload file to litterbox")?
+            .send().await.context(format!("failed to upload file '{}' to litterbox", file.display()))?
             .text().await.context("failed to get the text from the litterbox upload")?;
 
         let url = Url::parse(&response)
-            .context("failed to parse url recieved from litterbox")?;
+            .context(format!("failed to parse url recieved from litterbox: {response}"))?;
 
         Ok(Self { url, time: Instant::now() })
     }
@@ -323,20 +324,20 @@ impl ImgurImage {
             .post(Imgur::endpoint("upload"))
             .header("Authorization", format!("Client-ID {}", "0ce559de0c8a293"))
             .multipart(request)
-            .send().await.context("failed to upload file to imgur")?
+            .send().await.context(format!("failed to upload file '{}' to imgur", path.display()))?
             .text().await.context("failed to get the text from the imgur upload")?;
 
         let json: Value = serde_json::from_str(&response)
-            .context("failed to parse imgur upload response")?;
+            .context(format!("failed to parse imgur upload response: {response}"))?;
 
         if !json["success"].as_bool().unwrap_or(false) {
             bail!("imgur upload failed: {}", json["data"]["error"]);
         }
 
         let url = json["data"]["link"].as_str()
-            .context("failed to get link from imgur upload")?;
+            .context("failed to get link from imgur upload, json malformed")?;
         let url = Url::parse(url)
-            .context("failed to parse imgur upload link")?;
+            .context(format!("failed to parse imgur upload link '{url}'"))?;
         let delete_hash = json["data"]["deletehash"].as_str()
             .context("failed to get delete hash for imgur upload")?
             .to_string();
@@ -347,7 +348,7 @@ impl ImgurImage {
         Client::new()
             .delete(Imgur::endpoint_with_data("image", &self.delete_hash))
             .header("Authorization", format!("Client-ID {}", "0ce559de0c8a293"))
-            .send().await?;
+            .send().await.context("failed to delete imgur image")?;
         // make sure that the url can't be used anymore
         self.url.take();
         Ok(())
