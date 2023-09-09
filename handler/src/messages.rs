@@ -8,37 +8,37 @@ use tokio::sync::mpsc::{self, Sender, Receiver};
 
 use crate::{listener::{Listener, media_controls}, filesystem, config::Config};
 
-// spawns the filesystem function in a seperate task
-// which just logs an error if it exists
-// macro_rules! update_or_log {
-//     ($update:ident < $tx:expr, $config:expr, $str:tt) => {
-//         {
-//             let tx = $tx.clone();
-//             trace!("spawning task");
-//             tokio::spawn(async move {
-//                 trace!("running update");
-//                 filesystem::$update(&tx, &$config).await
-//                     .context($str)
-//                     .unwrap_or_else(|err| error!("{:?}", err))
-//             }).await.unwrap();
-//         }
-//     };
-// }
+/// Adds blocking versions (in the form of blocking_name) of a list of async methods
+macro_rules! add_blocking {
+    (
+        $(
+            pub async fn $name:ident(&$self:tt $(, $arg:ident: $ty:ty)* $(,)?) $(-> $ret:ty)? { $($body:tt)* }
+        )*
+    ) => {
+        $(
+            #[allow(dead_code)] pub async fn $name(&$self $(, $arg: $ty)*) $(-> $ret)? { $($body)* }
+            paste::paste!{ 
+                #[allow(dead_code)] pub fn [<blocking_ $name>](&$self $(, $arg: $ty)*) $(-> $ret)? {
+                    futures::executor::block_on($self.$name($($arg),*))
+                }
+            }
+        )*
+    };
+}
 
 #[derive(Debug)]
 pub enum Command {
     Exit,
-    Playback(MediaPlayback),
-    Metadata(OwnedMetadata),
+    Playback(Arc<MediaPlayback>),
+    Metadata(Arc<OwnedMetadata>),
     Volume(f64),
     Attached(bool),
-    PluginActivated(bool),
     Update,
     UpdatePlayback,
     UpdateMetadata,
     UpdateVolume,
     UpdatePluginActivation,
-    MediaControlEvent(MediaControlEvent),
+    MediaControlEvent(Arc<MediaControlEvent>),
 }
 
 impl Command {
@@ -48,42 +48,18 @@ impl Command {
             Command::Exit => (),
 
             Command::Metadata(metadata) => 
-                listener.metadata(&metadata.as_ref()).await.context("failed to set metadata")?, 
-            Command::Playback(playback) => {
-                listener.playback(&playback).await.context("failed to set playback")?;
-
-                if config.detach_on_stop {
-                    match playback {
-                        MediaPlayback::Stopped => tx.detach().await,
-                        // FIX: the plugin doesn't know whether the listeners detached due to a
-                        // stop or due to user input. This could lead to unwanted attaches.
-                        _ => tx.attach().await,
-                    }
-                }
-            }, 
+                listener.metadata(&(*metadata).as_ref()).await.context("failed to set metadata")?, 
+            Command::Playback(playback) => 
+                listener.playback(&playback).await.context("failed to set playback")?, 
             Command::Volume(volume) => 
                 listener.volume(volume).await.context("failed to set volume")?,
-            Command::Attached(true) if !attached => {
-                listener.attach().await.context("failed to attach")?; 
-                tx.update().await;
-            },
+            Command::Attached(true) if !attached =>
+                listener.attach().await.context("failed to attach")?,
             Command::Attached(false) if attached => 
                 listener.detach().await.context("failed to detach")?,
             // ignore attaches when already attached and detaches when already detached
             Command::Attached(_) => (),
-            Command::PluginActivated(activated) => {
-                if !activated && config.exit_with_plugin {
-                    tx.exit().await;
-                } else {
-                    tx.attach_as(activated).await;
-                }
-            }
 
-            // Command::Update => update_or_log!(update < tx, config, "failed to update handlers"),
-            // Command::UpdateMetadata => update_or_log!(update_metadata < tx, config, "failed to update metadata"),
-            // Command::UpdatePlayback => update_or_log!(update_playback < tx, config, "failed to update playback"),
-            // Command::UpdateVolume => update_or_log!(update_volume < tx, config, "failed to update volume"),
-            // Command::UpdatePluginActivation => update_or_log!(plugin_activation_changed < tx, config, "failed to update plugin activation"),
             Command::Update => 
                 filesystem::update(tx, &config).await.context("failed to update handlers")?,
             Command::UpdateMetadata => 
@@ -96,14 +72,17 @@ impl Command {
                 filesystem::plugin_activation_changed(tx, &config).await.context("failed to update plugin activation")?,
 
             Command::MediaControlEvent(event) =>
-                media_controls::handle_event(event, &config).await.context("failed to handle event")?,
+                media_controls::handle_event(&event, &config).await.context("failed to handle event")?,
         }
         Ok(())
     }
 }
 
 #[derive(Clone)]
-pub struct MessageSender { tx: Sender<Command> }
+pub struct MessageSender {
+    tx: Sender<Command>,
+    config: Arc<Config>,
+}
 
 impl MessageSender {
     async fn send(&self, command: Command) {
@@ -111,50 +90,73 @@ impl MessageSender {
             .expect("message reciever hung up before program ended");
     }
 
-    pub fn blocking_send(&self, command: Command) {
-        self.tx.blocking_send(command)
-            .expect("message reciever hung up before program ended");
+    // pub fn blocking_send(&self, command: Command) {
+    //     self.tx.blocking_send(command)
+    //         .expect("message reciever hung up before program ended");
+    // }
+
+    add_blocking! {
+        pub async fn exit(&self) {
+            self.detach().await;
+            self.send(Command::Exit).await
+        }
+        pub async fn update(&self) { self.send(Command::Update).await }
+
+        pub async fn playback(&self, playback: MediaPlayback) {
+            if self.config.detach_on_stop {
+                match playback {
+                    MediaPlayback::Stopped => self.detach().await,
+                    // the attach can't also update, or it could create an infinite loop of
+                    // checking the playback and updating
+                    // FIX: the plugin doesn't know whether the listeners detached due to a
+                    // stop or due to user input. This could lead to unwanted attaches.
+                    _ => self.attach_without_update().await,
+                }
+            }
+            self.send(Command::Playback(Arc::new(playback))).await
+        }
+        pub async fn metadata(&self, metadata: MediaMetadata<'_>) { self.send(Command::Metadata(Arc::new(metadata.into()))).await }
+        pub async fn volume(&self, volume: f64) { self.send(Command::Volume(volume)).await }
+        pub async fn plugin_activated(&self, activated: bool) {
+            if !activated && self.config.exit_with_plugin {
+                self.exit().await
+            } else {
+                self.attach_as(activated).await
+            }
+        }
+
+        pub async fn attach_as(&self, attached: bool) {
+            self.send(Command::Attached(attached)).await;
+            // send an update signal as well 
+            // a weird side effect of this is that 
+            //   the listeners always update
+            //   even if they're already attached
+            if attached { self.update().await }
+        }
+        pub async fn attach_without_update(&self) { self.send(Command::Attached(true)).await; }
+        pub async fn attach(&self) { self.attach_as(true).await }
+        pub async fn detach(&self) { self.attach_as(false).await }
+
+        pub async fn update_metadata(&self) { self.send(Command::UpdateMetadata).await }
+        pub async fn update_playback(&self) { self.send(Command::UpdatePlayback).await }
+        pub async fn update_volume(&self) { self.send(Command::UpdateVolume).await }
+        pub async fn update_plugin_activation(&self) { self.send(Command::UpdatePluginActivation).await }
+
+        pub async fn media_control_event(&self, event: MediaControlEvent) { self.send(Command::MediaControlEvent(Arc::new(event))).await }
     }
-
-    pub async fn exit(&self) { self.send(Command::Exit).await }
-    pub async fn update(&self) { self.send(Command::Update).await }
-
-    pub async fn playback(&self, playback: MediaPlayback) { self.send(Command::Playback(playback)).await }
-    pub async fn metadata(&self, metadata: MediaMetadata<'_>) { self.send(Command::Metadata(metadata.into())).await }
-    pub async fn volume(&self, volume: f64) { self.send(Command::Volume(volume)).await }
-    pub async fn plugin_activated(&self, activated: bool) { self.send(Command::PluginActivated(activated)).await }
-
-    pub async fn attach_as(&self, attached: bool) { self.send(Command::Attached(attached)).await }
-    pub async fn attach(&self) { self.attach_as(true).await }
-    pub async fn detach(&self) { self.attach_as(false).await }
-
-    // pub async fn update_metadata(&self) { self.send(Command::UpdateMetadata).await }
-    // pub async fn update_playback(&self) { self.send(Command::UpdatePlayback).await }
-    // pub async fn update_volume(&self) { self.send(Command::UpdateVolume).await }
-    // pub async fn update_plugin_activation(&self) { self.send(Command::UpdatePluginActivation).await }
-
-    pub fn blocking_exit(&self) { self.blocking_send(Command::Exit) }
-    pub fn blocking_update(&self) { self.blocking_send(Command::Update) }
-    pub fn blocking_attach(&self) { self.blocking_send(Command::Attached(true)) }
-    pub fn blocking_detach(&self) { self.blocking_send(Command::Attached(false)) }
-
-    pub fn blocking_update_metadata(&self) { self.blocking_send(Command::UpdateMetadata) }
-    pub fn blocking_update_playback(&self) { self.blocking_send(Command::UpdatePlayback) }
-    pub fn blocking_update_volume(&self) { self.blocking_send(Command::UpdateVolume) }
-    pub fn blocking_update_plugin_activation(&self) { self.blocking_send(Command::UpdatePluginActivation) }
 }
 
 pub struct Messages { tx: MessageSender, rx: Receiver<Command> }
 
 impl Messages {
-    pub fn new() -> Messages {
+    pub fn new(config: Arc<Config>) -> Messages {
         // it's important that the channel has some
         // space in its buffer so that the filesystem
         // doesn't block in filesystem::plugin_activation_changed.
         // that could create a deadlock when the daemon exits,
         // and tries to lock the listeners to detach them
         let (tx, rx) = mpsc::channel(8);
-        Self { tx: MessageSender { tx }, rx }
+        Self { tx: MessageSender { tx, config }, rx }
     }
 
     /// Returns a [clone](Clone) of the [`MessageSender`]

@@ -4,7 +4,7 @@ use daemonize::Daemonize;
 use anyhow::{Result, Context, bail, Error};
 use log::{error, debug, trace};
 
-use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Listener}, filesystem, tray, messages::Messages, cli::RunConfig, logger};
+use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc}, filesystem, tray, messages::Messages, cli::RunConfig, logger};
 
 pub fn pid_file(config: &Config) -> PathBuf {
     crate::project_dirs().and_then(|directories| directories.runtime_dir().map(Path::to_owned))
@@ -96,7 +96,7 @@ async fn create(config: Config, tray: bool) -> Result<()> {
     let config = Arc::new(config);
 
     // setup messages
-    let messages = Messages::new();
+    let messages = Messages::new(config.clone());
 
     {
         let tx = messages.sender();
@@ -160,14 +160,6 @@ async fn create(config: Config, tray: bool) -> Result<()> {
     }
 
     trace!("caught up with gtk");
-
-    // Detach the listeners at the end
-    // this isn't necessary for the media controls,
-    // but it is for rpc
-    listeners.detach().await
-        .context("failed to finally detach everything")?;
-
-    trace!("listeners have detached");
 
     remove_pid(&config)
         .context("failed to remove the pid")?;

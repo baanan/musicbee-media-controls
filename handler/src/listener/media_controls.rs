@@ -8,7 +8,7 @@ use souvlaki::*;
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, communication::Action, messages::{MessageSender, Command}};
+use crate::{config::Config, communication::Action, messages::MessageSender};
 
 use super::Listener;
 
@@ -65,7 +65,7 @@ impl Listener for Controls {
 
         let sender = self.sender.clone();
         self.controls
-            .attach(move |event| sender.blocking_send(Command::MediaControlEvent(event)))
+            .attach(move |event| sender.blocking_media_control_event(event))
             .map_err(ControlsError::from)?;
         self.attached = true;
 
@@ -111,7 +111,7 @@ impl Listener for Controls {
     fn attached(&self) -> bool { self.attached }
 }
 
-pub async fn handle_event(event: MediaControlEvent, config: &Config) -> Result<()> {
+pub async fn handle_event(event: &MediaControlEvent, config: &Config) -> Result<()> {
     #[allow(clippy::enum_glob_use)]
     use MediaControlEvent::*;
     debug!("Recieved control event: {event:?}");
@@ -121,12 +121,12 @@ pub async fn handle_event(event: MediaControlEvent, config: &Config) -> Result<(
         Previous => config.run_simple_command("/Previous")?,
         Stop => config.run_simple_command("/Stop")?,
         OpenUri(uri) => config.run_command("/Play", Some(map_uri(uri)))?,
-        Seek(direction) => directioned_duration_to_seek(direction, config.media_controls.seek_amount)?
+        Seek(direction) => directioned_duration_to_seek(*direction, config.media_controls.seek_amount)?
             .run(config).await?,
-        SeekBy(direction, duration) => directioned_duration_to_seek(direction, duration)?
+        SeekBy(direction, duration) => directioned_duration_to_seek(*direction, *duration)?
             .run(config).await?,
-        SetPosition(MediaPosition(pos)) => Action::Position(pos).run(config).await?,
-        SetVolume(vol) => if config.media_controls.send_volume { Action::Volume(vol).run(config).await? },
+        SetPosition(MediaPosition(pos)) => Action::Position(*pos).run(config).await?,
+        SetVolume(vol) => if config.media_controls.send_volume { Action::Volume(*vol).run(config).await? },
         _ => { error!("Event {event:?} not implemented") } // TODO: implement other events
     }
     Ok(())
@@ -144,14 +144,14 @@ fn directioned_duration_to_seek(direction: SeekDirection, duration: Duration) ->
     Ok(Action::Seek { milis })
 }
 
-fn map_uri(uri: String) -> String {
-    let url = Url::parse(&uri);
+fn map_uri(uri: &str) -> String {
+    let url = Url::parse(uri);
     match url {
         Ok(url) if url.scheme() == "file" => map_file_uri(&url),
         Ok(url) => url.to_string(),
         Err(_) => {
             trace!("uri given was not a valid uri, defaulting to file");
-            uri
+            uri.to_string()
         }
     }
 }

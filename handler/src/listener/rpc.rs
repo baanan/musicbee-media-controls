@@ -33,7 +33,7 @@ impl Rpc {
         let client = DiscordIpcClient::new("942300665726767144")
             .expect("failed to create discord ipc client");
 
-        let cover_cache = CoverCache::with(&Service::Litterbox);
+        let cover_cache = CoverCache::with(&Service::Imgur);
 
         Self { client, config, cover_cache, attached: false }
     }
