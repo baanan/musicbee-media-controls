@@ -3,8 +3,9 @@ use std::{path::{PathBuf, Path}, sync::Arc, fs, thread, time::Duration};
 use daemonize::Daemonize;
 use anyhow::{Result, Context, bail, Error};
 use log::{error, debug, trace};
+use tokio::task;
 
-use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc}, filesystem, tray, messages::Messages, cli::RunConfig, logger};
+use crate::{config::Config, listener::{media_controls::Controls, self, rpc::Rpc, Logger}, filesystem::{self, Filesystem}, tray, messages::Messages, cli::RunConfig, logger};
 
 pub fn pid_file(config: &Config) -> PathBuf {
     crate::project_dirs().and_then(|directories| directories.runtime_dir().map(Path::to_owned))
@@ -100,12 +101,14 @@ async fn create(config: Config, tray: bool) -> Result<()> {
 
     {
         let tx = messages.sender();
-        ctrlc::set_handler(move || tx.blocking_exit())
+        ctrlc::set_handler(move || tx.exit())
             .context("failed to set termination interupt")?;
     }
 
     // setup listeners
     let mut listeners = listener::List::new();
+    listeners.add(Logger);
+    listeners.add(Filesystem::new(messages.sender()));
 
     // media controls
     if config.media_controls.enabled {
@@ -138,13 +141,18 @@ async fn create(config: Config, tray: bool) -> Result<()> {
 
     // -- running -- //
 
-    // get initial values by queueing up an update
-    if filesystem::plugin_available(&config).await?.unwrap_or(false) { 
-        messages.sender().update().await; 
-    }
+    let sender = messages.sender();
 
     // start listening to messages
-    messages.listen_until_exit(&mut listeners, config.clone()).await?;
+    let handle = task::spawn(messages.listen_until_exit(listeners, config.clone()));
+
+    // get initial values by queueing up an update
+    if filesystem::plugin_available(&config).await?.unwrap_or(false) { 
+        sender.attach(); 
+    }
+
+    // finish listening to messages
+    handle.await?;
 
     // -- cleanup -- //
 

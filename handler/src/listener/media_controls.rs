@@ -8,16 +8,12 @@ use souvlaki::*;
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, communication::Action, messages::MessageSender};
+use crate::{config::Config, communication::Action, messages::{MessageSender, Command}};
 
 use super::Listener;
 
 #[derive(Debug, Error)]
 pub enum ControlsError {
-    #[error("tried to attach when already attached")]
-    AlreadyAttached,
-    #[error("tried to detach when already detached")]
-    AlreadyDetached,
     #[error("system error: {0:?}")]
     System(souvlaki::Error)
 }
@@ -34,6 +30,33 @@ pub struct Controls {
     controls: MediaControls,
     sender: MessageSender,
     attached: bool,
+}
+
+#[async_trait]
+impl Listener for Controls {
+    async fn handle(&mut self, command: Command, config: &Config) -> Result<()> {
+        match command {
+            Command::Metadata(metadata) => 
+                self.metadata(&(*metadata).as_ref()).await.context("failed to set metadata")?, 
+            Command::Playback(playback) => 
+                self.playback(&playback).await.context("failed to set playback")?, 
+            Command::Volume(volume) => 
+                self.volume(volume).await.context("failed to set volume")?,
+            Command::Attached(true) if !self.attached =>
+                self.attach().await.context("failed to attach")?,
+            Command::Attached(false) if self.attached => 
+                self.detach().await.context("failed to detach")?,
+            // ignore attaches when already attached and detaches when already detached
+            Command::Attached(_) => (),
+
+            Command::MediaControlEvent(event) =>
+                handle_event(&event, config).await.context("failed to handle event")?,
+            _ => (),
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &'static str { "media controls" }
 }
 
 impl Controls {
@@ -53,19 +76,14 @@ impl Controls {
             attached: false,
         })
     }
-}
 
-#[async_trait]
-impl Listener for Controls {
     /// Attaches media controls to a handler
     async fn attach(&mut self) -> Result<()> {
-        if self.attached {
-            return Err(ControlsError::AlreadyAttached)?;
-        }
+        assert!(!self.attached, "can only attach when not already attached");
 
         let sender = self.sender.clone();
         self.controls
-            .attach(move |event| sender.blocking_media_control_event(event))
+            .attach(move |event| sender.media_control_event(event))
             .map_err(ControlsError::from)?;
         self.attached = true;
 
@@ -74,9 +92,7 @@ impl Listener for Controls {
 
     /// Detatches the media controls from a handler
     async fn detach(&mut self) -> Result<()> {
-        if !self.attached {
-            return Err(ControlsError::AlreadyDetached)?;
-        }
+        assert!(self.attached, "can only detach when attached");
 
         self.controls.detach().map_err(ControlsError::from)?;
         self.attached = false;
@@ -85,7 +101,7 @@ impl Listener for Controls {
     }
 
     /// Delegate to set the metadata of the controls
-    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+    async fn metadata(&mut self, metadata: &MediaMetadata<'_>) -> Result<()> {
         if self.attached { 
             self.controls.set_metadata(metadata.clone()).map_err(ControlsError::from)?; 
         }
@@ -107,8 +123,6 @@ impl Listener for Controls {
         }
         Ok(())
     }
-
-    fn attached(&self) -> bool { self.attached }
 }
 
 pub async fn handle_event(event: &MediaControlEvent, config: &Config) -> Result<()> {

@@ -14,7 +14,7 @@ use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 use url::Url;
 
-use crate::config::Config;
+use crate::{config::Config, messages::Command};
 
 use super::Listener;
 
@@ -23,6 +23,26 @@ pub struct Rpc {
     cover_cache: CoverCache,
     config: Arc<Config>,
     attached: bool,
+}
+
+#[async_trait]
+impl Listener for Rpc {
+    async fn handle(&mut self, command: Command, _: &Config) -> Result<()> {
+        match command {
+            Command::Metadata(metadata) => 
+                self.metadata(&(*metadata).as_ref()).await.context("failed to set metadata")?, 
+            Command::Attached(true) if !self.attached =>
+                self.attach().await.context("failed to attach")?,
+            Command::Attached(false) if self.attached => 
+                self.detach().await.context("failed to detach")?,
+            // ignore attaches when already attached and detaches when already detached
+            Command::Attached(_) => (),
+            _ => (),
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &'static str { "rpc" }
 }
 
 impl Rpc {
@@ -37,11 +57,8 @@ impl Rpc {
 
         Self { client, config, cover_cache, attached: false }
     }
-}
 
-#[async_trait]
-impl Listener for Rpc {
-    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
+    async fn metadata(&mut self, metadata: &MediaMetadata<'_>) -> Result<()> {
         if !self.attached { return Ok(()); }
 
         let MediaMetadata { title, album, artist, cover_url, .. } = metadata;
@@ -65,14 +82,6 @@ impl Listener for Rpc {
         Ok(())
     }
 
-    async fn volume(&mut self, _volume: f64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn playback(&mut self, _playback: &souvlaki::MediaPlayback) -> Result<()> {
-        Ok(())
-    }
-
     async fn attach(&mut self) -> Result<()> {
         if !self.attached {
             self.client.connect()
@@ -91,8 +100,6 @@ impl Listener for Rpc {
         }
         Ok(())
     }
-
-    fn attached(&self) -> bool { self.attached }
 }
 
 struct CoverCache {
@@ -297,21 +304,24 @@ impl UploadService for Imgur {
 
 #[derive(Debug)]
 struct ImgurImage {
-    url: Option<Url>,
-    // it would be best to have the delete hash also under an option (well more the entire struct)
-    // in order to ensure that nothing can access the image after it's been deleted
-    // but that's just unnecessary compexity at that point
-    delete_hash: String,
+    // Images are only deleted through UploadedFile::delete which takes ownership of the image and
+    // thus invalidates the url, or through Drop which is only run when the entire image is deleted
+    // So the url doesn't have to be in an Option
+    url: Url,
+    // but the delete hash does to make sure Drop doesn't try to delete the image a second time
+    // (although now that drop isn't being used anymore, it's not that important)
+    delete_hash: Option<String>,
 }
 
 #[async_trait]
 impl UploadedFile for ImgurImage {
     fn url(&self) -> Option<Url> {
-        self.url.as_ref().cloned()
+        Some(self.url.clone())
     }
 
     async fn delete(mut self: Box<Self>) -> Result<()> {
-        self.delete_inner().await
+        self.delete_inner().await?;
+        Ok(())
     }
 }
 
@@ -341,22 +351,23 @@ impl ImgurImage {
         let delete_hash = json["data"]["deletehash"].as_str()
             .context("failed to get delete hash for imgur upload")?
             .to_string();
-        Ok(Self { url: Some(url), delete_hash })
+        let delete_hash = Some(delete_hash);
+        Ok(Self { url, delete_hash })
     }
 
     async fn delete_inner(&mut self) -> Result<()> {
+        let Some(ref delete_hash) = self.delete_hash else { return Ok(()); };
+        trace!("deleting {}", self.url);
         Client::new()
-            .delete(Imgur::endpoint_with_data("image", &self.delete_hash))
+            .delete(Imgur::endpoint_with_data("image", delete_hash))
             .header("Authorization", format!("Client-ID {}", "0ce559de0c8a293"))
             .send().await.context("failed to delete imgur image")?;
-        // make sure that the url can't be used anymore
-        self.url.take();
         Ok(())
     }
 }
 
-impl Drop for ImgurImage {
-    fn drop(&mut self) {
-        futures::executor::block_on(self.delete_inner()).expect("failed to delete imgur image");
-    }
-}
+// impl Drop for ImgurImage {
+//     fn drop(&mut self) {
+//         futures::executor::block_on(self.delete_inner()).expect("failed to delete imgur image");
+//     }
+// }

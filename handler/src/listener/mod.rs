@@ -2,31 +2,33 @@
 use anyhow::Result;
 
 use async_trait::async_trait;
-use futures::{future::join_all, Future};
-use log::{trace, debug};
-use souvlaki::{MediaMetadata, MediaPlayback};
-use futures::FutureExt;
+use futures::future::join_all;
+use log::{error, debug};
+use souvlaki::MediaPlayback;
+use tokio::sync::broadcast::Receiver;
+
+use crate::{messages::Command, config::Config};
 
 pub mod media_controls;
 pub mod rpc;
 
 #[async_trait]
 pub trait Listener {
-    /// Called when the metadata is updated
-    ///
-    /// The `metadata`'s cover is guaranteed to be a valid [`Url`](url::Url)
-    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()>;
-    /// Called when the volume is updated
-    async fn volume(&mut self, volume: f64) -> Result<()>;
-    /// Called when the playback is updated
-    async fn playback(&mut self, playback: &MediaPlayback) -> Result<()>;
+    async fn handle(&mut self, command: Command, config: &Config) -> Result<()>;
 
-    /// Attach / resume the listener
-    async fn attach(&mut self) -> Result<()>;
-    /// Detach / pause the listener
-    async fn detach(&mut self) -> Result<()>;
+    async fn listen(mut self: Box<Self>, mut reciever: Receiver<Command>, config: &Config) {
+        while let Ok(command) = reciever.recv().await {
+            if matches!(command, Command::Exit) {
+                debug!("{} exited", self.name());
+                break;
+            }
 
-    fn attached(&self) -> bool;
+            self.handle(command, config).await
+                .unwrap_or_else(|err| error!("{} failed to handle command: {err}", self.name()));
+        }
+    }
+
+    fn name(&self) -> &'static str;
 }
 
 #[derive(Default)]
@@ -41,59 +43,34 @@ impl List {
         self.listeners.push(Box::new(listener));
     }
 
-    async fn update_all<'a, Fut, F>(&'a mut self, func: F) -> Result<()> 
-    where 
-        F: Fn(&'a mut Box<dyn Listener + Send>) -> Fut,
-        Fut: Future<Output = Result<()>> + 'a
-    {
-        let updates = self.listeners.iter_mut()
-            .map(func);
-        join_all(updates).await.into_iter()
-            .collect::<Result<()>>()?;
-        Ok(())
+    pub async fn listen(self, reciever: Receiver<Command>, config: &Config) {
+        let futures = self.listeners.into_iter()
+            .map(|listener| listener.listen(reciever.resubscribe(), config));
+        join_all(futures).await;
     }
 }
 
+pub struct Logger;
 #[async_trait]
-impl Listener for List {
-    async fn metadata(&mut self, metadata: &MediaMetadata) -> Result<()> {
-        debug!("updating metadata: {} - {}", metadata.artist.unwrap_or_default(), metadata.title.unwrap_or_default());
-        self.update_all(|listener| listener.metadata(metadata)).await
+impl Listener for Logger {
+    async fn handle(&mut self, command: Command, _: &Config) -> Result<()> {
+        match command {
+            Command::Exit => debug!("exit command recieved"),
+            Command::Metadata(metadata) => debug!(
+                "updating metadata: {} - {}",
+                metadata.artist.as_deref().unwrap_or_default(),
+                metadata.title.as_deref().unwrap_or_default()
+            ),
+            Command::Playback(playback) => debug!("updating playback: {}", display_playback(&playback)),
+            Command::Attached(true) => debug!("attaching..."),
+            Command::Attached(false) => debug!("detaching..."),
+            Command::Volume(vol) => debug!("updating volume: {vol}"),
+            _ => (),
+        }
+        Ok(())
     }
 
-    async fn volume(&mut self, volume: f64) -> Result<()> {
-        debug!("updating volume: {volume}");
-        self.update_all(|listener| listener.volume(volume)).await
-    }
-
-    async fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
-        debug!("updating playback: {}", display_playback(playback));
-        self.update_all(|listener| listener.playback(playback)).await
-    }
-
-    async fn attach(&mut self) -> Result<()> {
-        trace!("Attaching");
-        self.update_all(|listener| { 
-            if !listener.attached() { 
-                return listener.attach();
-            }
-            futures::future::ready(Ok(())).boxed()
-        }).await
-    }
-
-    async fn detach(&mut self) -> Result<()> {
-        trace!("Detaching");
-        self.update_all(|listener| { 
-            if listener.attached() { 
-                return listener.detach();
-            }
-            futures::future::ready(Ok(())).boxed()
-        }).await
-    }
-
-    fn attached(&self) -> bool {
-        self.listeners.iter().all(|listener| listener.attached())
-    }
+    fn name(&self) -> &'static str { "logger" }
 }
 
 fn display_playback(playback: &MediaPlayback) -> &'static str {

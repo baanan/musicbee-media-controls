@@ -1,13 +1,14 @@
 use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::Arc, io};
 
 use anyhow::{Result, Context};
+use async_trait::async_trait;
 use log::*;
 use souvlaki::*;
 use notify::{Watcher, RecursiveMode, event::{Event, EventKind, ModifyKind}, RecommendedWatcher};
 use thiserror::Error;
 use url::Url;
 
-use crate::{config::Config, messages::MessageSender};
+use crate::{config::Config, messages::{MessageSender, Command}, listener::Listener};
 
 pub const METADATA_FILE: &str = "metadata";
 pub const PLAYBACK_FILE: &str = "playback";
@@ -15,10 +16,7 @@ pub const ACTION_FILE: &str = "action";
 pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
 pub const VOLUME_FILE: &str = "volume";
 
-pub fn watch(
-    message_sender: MessageSender,
-    config: Arc<Config>,
-) -> Result<RecommendedWatcher> {
+pub fn watch(message_sender: MessageSender, config: Arc<Config>) -> Result<RecommendedWatcher> {
     let communication_directory = config.communication.directory.clone();
 
     let mut watcher = notify::recommended_watcher(move |event| handle_event(event, &message_sender))?;
@@ -27,10 +25,7 @@ pub fn watch(
     Ok(watcher)
 }
 
-fn handle_event(
-    event: notify::Result<Event>,
-    sender: &MessageSender,
-) {
+fn handle_event(event: notify::Result<Event>, sender: &MessageSender) {
     let Ok(event) = event else { return };
 
     if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
@@ -41,14 +36,45 @@ fn handle_event(
 
         for file_name in file_names {
             match file_name {
-                METADATA_FILE => sender.blocking_update_metadata(),
-                PLAYBACK_FILE => sender.blocking_update_playback(),
-                VOLUME_FILE => sender.blocking_update_volume(),
-                PLUGIN_ACTIVATED_FILE => sender.blocking_update_plugin_activation(),
+                METADATA_FILE => sender.update_metadata(),
+                PLAYBACK_FILE => sender.update_playback(),
+                VOLUME_FILE => sender.update_volume(),
+                PLUGIN_ACTIVATED_FILE => sender.update_plugin_activation(),
                 _ => {},
             }
         }
     }
+}
+
+pub struct Filesystem { sender: MessageSender }
+
+impl Filesystem {
+    pub fn new(sender: MessageSender) -> Self {
+        Self { sender }
+    }
+}
+
+#[async_trait]
+impl Listener for Filesystem {
+    async fn handle(&mut self, command: Command, config: &Config) -> Result<()> {
+        let Self { sender } = self;
+        match command {
+            Command::Update => 
+                update(sender, config).await.context("failed to update handlers")?,
+            Command::UpdateMetadata => 
+                update_metadata(sender, config).await.context("failed to update metadata")?,
+            Command::UpdatePlayback => 
+                update_playback(sender, config).await.context("failed to update playback")?,
+            Command::UpdateVolume => 
+                update_volume(sender, config).await.context("failed to update volume")?,
+            Command::UpdatePluginActivation => 
+                plugin_activation_changed(sender, config).await.context("failed to update plugin activation")?,
+            _ => (),
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &'static str { "filesystem" }
 }
 
 pub fn create_file_structure(config: &Config) -> io::Result<()> {
@@ -90,21 +116,18 @@ pub async fn plugin_available(config: &Config) -> Result<Option<bool>> {
 }
 
 #[allow(unused_variables)] // TODO: todo
-pub async fn plugin_activation_changed(
-    sender: &MessageSender,
-    config: &Config,
-) -> Result<()> {
+pub async fn plugin_activation_changed(send: &MessageSender, config: &Config) -> Result<()> {
     if let Some(activated) = plugin_available(config).await? {
-        sender.plugin_activated(activated).await;
+        send.plugin_activated(activated);
     }
     Ok(())
 }
 
-pub async fn update(sender: &MessageSender, config: &Config) -> Result<()> {
+pub async fn update(send: &MessageSender, config: &Config) -> Result<()> {
     let (metadata, playback, volume) = futures::join!(
-        update_metadata(sender, config),
-        update_playback(sender, config),
-        update_volume(sender, config),
+        update_metadata(send, config),
+        update_playback(send, config),
+        update_volume(send, config),
     );
     metadata.context("failed to update metadata")?;
     playback.context("failed to update playback")?;
@@ -112,7 +135,7 @@ pub async fn update(sender: &MessageSender, config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub async fn update_playback(sender: &MessageSender, config: &Config) -> Result<()> {
+pub async fn update_playback(send: &MessageSender, config: &Config) -> Result<()> {
     let playback = config.read_comm_file(PLAYBACK_FILE).await
         .context("failed to read the playback file")?;
 
@@ -140,14 +163,14 @@ pub async fn update_playback(sender: &MessageSender, config: &Config) -> Result<
             }
         };
 
-        sender.playback(playback).await;
+        send.playback(playback);
     } else {
         return Err(MalformedFile::Playback(playback.trim().to_owned()))?;
     }
     Ok(())
 }
 
-pub async fn update_metadata(sender: &MessageSender, config: &Config) -> Result<()> {
+pub async fn update_metadata(send: &MessageSender, config: &Config) -> Result<()> {
     let metadata = config.read_comm_file(METADATA_FILE).await
         .context("failed to read the metadata file")?;
 
@@ -162,21 +185,21 @@ pub async fn update_metadata(sender: &MessageSender, config: &Config) -> Result<
             .map(Duration::from_millis)
             .context("failed to parse the song duration as a number")?;
 
-        sender
+        send
             .metadata(MediaMetadata {
                 title: Some(title),
                 album: Some(album),
                 artist: Some(artist),
                 cover_url: map_cover(cover_url, config, artist, title).as_deref(),
                 duration: Some(duration),
-            }).await;
+            });
         Ok(())
     } else {
         Err(MalformedFile::Metadata(metadata))?
     }
 }
 
-pub async fn update_volume(sender: &MessageSender, config: &Config) -> Result<()> {
+pub async fn update_volume(send: &MessageSender, config: &Config) -> Result<()> {
     let volume = config.read_comm_file(VOLUME_FILE).await
         .context("failed to read the volume file")?;
 
@@ -186,7 +209,7 @@ pub async fn update_volume(sender: &MessageSender, config: &Config) -> Result<()
     let volume: f64 = volume.trim().parse()
         .map_err(|_| MalformedFile::Volume(volume))?;
 
-    sender.volume(volume).await;
+    send.volume(volume);
 
     Ok(())
 }
