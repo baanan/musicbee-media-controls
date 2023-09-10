@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, sync::Arc, io};
+use std::{path::{Path, PathBuf}, ops::Deref, ffi::OsStr, fs::OpenOptions, time::Duration, io};
 
 use anyhow::{Result, Context};
 use async_trait::async_trait;
@@ -16,7 +16,7 @@ pub const ACTION_FILE: &str = "action";
 pub const PLUGIN_ACTIVATED_FILE: &str = "plugin-activated";
 pub const VOLUME_FILE: &str = "volume";
 
-pub fn watch(message_sender: MessageSender, config: Arc<Config>) -> Result<RecommendedWatcher> {
+pub fn watch(message_sender: MessageSender, config: &Config) -> Result<RecommendedWatcher> {
     let communication_directory = config.communication.directory.clone();
 
     let mut watcher = notify::recommended_watcher(move |event| handle_event(event, &message_sender))?;
@@ -28,6 +28,7 @@ pub fn watch(message_sender: MessageSender, config: Arc<Config>) -> Result<Recom
 fn handle_event(event: notify::Result<Event>, sender: &MessageSender) {
     let Ok(event) = event else { return };
 
+    // FIX: remove repeats
     if let EventKind::Modify(ModifyKind::Data(_)) = event.kind {
         let file_names = event.paths.iter()
             .map(Deref::deref)
@@ -49,7 +50,7 @@ fn handle_event(event: notify::Result<Event>, sender: &MessageSender) {
 pub struct Filesystem { sender: MessageSender }
 
 impl Filesystem {
-    pub fn new(sender: MessageSender) -> Self {
+    pub const fn new(sender: MessageSender) -> Self {
         Self { sender }
     }
 }
@@ -115,15 +116,14 @@ pub async fn plugin_available(config: &Config) -> Result<Option<bool>> {
     Ok(Some(text.parse().context("failed to parse plugin availability")?))
 }
 
-#[allow(unused_variables)] // TODO: todo
-pub async fn plugin_activation_changed(send: &MessageSender, config: &Config) -> Result<()> {
+async fn plugin_activation_changed(send: &MessageSender, config: &Config) -> Result<()> {
     if let Some(activated) = plugin_available(config).await? {
         send.plugin_activated(activated);
     }
     Ok(())
 }
 
-pub async fn update(send: &MessageSender, config: &Config) -> Result<()> {
+async fn update(send: &MessageSender, config: &Config) -> Result<()> {
     let (metadata, playback, volume) = futures::join!(
         update_metadata(send, config),
         update_playback(send, config),
@@ -135,7 +135,7 @@ pub async fn update(send: &MessageSender, config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub async fn update_playback(send: &MessageSender, config: &Config) -> Result<()> {
+async fn update_playback(send: &MessageSender, config: &Config) -> Result<()> {
     let playback = config.read_comm_file(PLAYBACK_FILE).await
         .context("failed to read the playback file")?;
 
@@ -170,7 +170,7 @@ pub async fn update_playback(send: &MessageSender, config: &Config) -> Result<()
     Ok(())
 }
 
-pub async fn update_metadata(send: &MessageSender, config: &Config) -> Result<()> {
+async fn update_metadata(send: &MessageSender, config: &Config) -> Result<()> {
     let metadata = config.read_comm_file(METADATA_FILE).await
         .context("failed to read the metadata file")?;
 
@@ -199,7 +199,7 @@ pub async fn update_metadata(send: &MessageSender, config: &Config) -> Result<()
     }
 }
 
-pub async fn update_volume(send: &MessageSender, config: &Config) -> Result<()> {
+async fn update_volume(send: &MessageSender, config: &Config) -> Result<()> {
     let volume = config.read_comm_file(VOLUME_FILE).await
         .context("failed to read the volume file")?;
 

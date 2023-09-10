@@ -73,7 +73,7 @@ impl Listener for Logger {
     fn name(&self) -> &'static str { "logger" }
 }
 
-fn display_playback(playback: &MediaPlayback) -> &'static str {
+const fn display_playback(playback: &MediaPlayback) -> &'static str {
     match playback {
         MediaPlayback::Stopped => "stopped",
         MediaPlayback::Paused { .. } => "paused",

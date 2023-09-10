@@ -10,6 +10,8 @@ use tokio::{fs, io};
 
 use log::*;
 
+use crate::listener::rpc;
+
 // TODO: accept null for mappings 
 
 // HACK: make this better
@@ -25,7 +27,7 @@ fn get_username() -> String {
 
 lazy_static!(
     // searches for multiple things at a time
-    pub static ref REFERENCES: AhoCorasick = AhoCorasick::new(["{home_dir}", "{username}", "{wine_prefix}"]).unwrap();
+    pub static ref REFERENCES: AhoCorasick = AhoCorasick::new(["{home_dir}", "{username}", "{wine_prefix}"]).expect("parse to work");
 );
 
 fn replace(key: &str, config: &UnresolvedConfig) -> String {
@@ -237,6 +239,7 @@ pub struct MediaControls {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Rpc {
     pub enabled: bool,
+    pub service: rpc::Service,
 }
 
 pub type Config = Referenced<ReferencedString>;
@@ -346,6 +349,7 @@ impl Default for Rpc {
     fn default() -> Self {
         Self {
             enabled: false,
+            service: rpc::Service::Imgur,
         }
     }
 }

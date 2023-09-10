@@ -37,20 +37,19 @@ impl Listener for Controls {
     async fn handle(&mut self, command: Command, config: &Config) -> Result<()> {
         match command {
             Command::Metadata(metadata) => 
-                self.metadata(&(*metadata).as_ref()).await.context("failed to set metadata")?, 
+                self.metadata(&(*metadata).as_ref()).context("failed to set metadata")?, 
             Command::Playback(playback) => 
-                self.playback(&playback).await.context("failed to set playback")?, 
+                self.playback(&playback).context("failed to set playback")?, 
             Command::Volume(volume) => 
-                self.volume(volume).await.context("failed to set volume")?,
+                self.volume(volume).context("failed to set volume")?,
             Command::Attached(true) if !self.attached =>
-                self.attach().await.context("failed to attach")?,
+                self.attach().context("failed to attach")?,
             Command::Attached(false) if self.attached => 
-                self.detach().await.context("failed to detach")?,
-            // ignore attaches when already attached and detaches when already detached
-            Command::Attached(_) => (),
+                self.detach().context("failed to detach")?,
 
             Command::MediaControlEvent(event) =>
                 handle_event(&event, config).await.context("failed to handle event")?,
+            // NOTE: ignores attaches when already attached and detaches when already detached
             _ => (),
         }
         Ok(())
@@ -78,7 +77,7 @@ impl Controls {
     }
 
     /// Attaches media controls to a handler
-    async fn attach(&mut self) -> Result<()> {
+    fn attach(&mut self) -> Result<()> {
         assert!(!self.attached, "can only attach when not already attached");
 
         let sender = self.sender.clone();
@@ -91,7 +90,7 @@ impl Controls {
     }
 
     /// Detatches the media controls from a handler
-    async fn detach(&mut self) -> Result<()> {
+    fn detach(&mut self) -> Result<()> {
         assert!(self.attached, "can only detach when attached");
 
         self.controls.detach().map_err(ControlsError::from)?;
@@ -101,7 +100,7 @@ impl Controls {
     }
 
     /// Delegate to set the metadata of the controls
-    async fn metadata(&mut self, metadata: &MediaMetadata<'_>) -> Result<()> {
+    fn metadata(&mut self, metadata: &MediaMetadata<'_>) -> Result<()> {
         if self.attached { 
             self.controls.set_metadata(metadata.clone()).map_err(ControlsError::from)?; 
         }
@@ -109,7 +108,7 @@ impl Controls {
     }
 
     /// Delegate to set the volume of the controls
-    async fn volume(&mut self, volume: f64) -> Result<()> {
+    fn volume(&mut self, volume: f64) -> Result<()> {
         if self.attached { 
             self.controls.set_volume(volume).map_err(ControlsError::from)?;
         }
@@ -117,7 +116,7 @@ impl Controls {
     }
 
     /// Delegate to set the playback of the controls
-    async fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
+    fn playback(&mut self, playback: &MediaPlayback) -> Result<()> {
         if self.attached { 
             self.controls.set_playback(playback.clone()).map_err(ControlsError::from)?; 
         }

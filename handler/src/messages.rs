@@ -96,7 +96,7 @@ impl MessageSender {
 pub struct Messages { tx: MessageSender, rx: Receiver<Command> }
 
 impl Messages {
-    pub fn new(config: Arc<Config>) -> Messages {
+    pub fn new(config: Arc<Config>) -> Self {
         // it's important that the channel has some
         // space in its buffer so that the filesystem
         // doesn't block in filesystem::plugin_activation_changed.
@@ -126,7 +126,7 @@ pub struct OwnedMetadata {
 
 impl OwnedMetadata {
     pub fn as_ref(&self) -> MediaMetadata<'_> {
-        let OwnedMetadata { title, album, artist, cover_url, duration } = self;
+        let Self { title, album, artist, cover_url, duration } = self;
         MediaMetadata {
             title: title.as_deref(),
             album: album.as_deref(),
@@ -137,9 +137,8 @@ impl OwnedMetadata {
     }
 }
 
-// this is ugly, because souvlaki turns a MediaMetadata into its own form of OwnedMetadata
-// therefore, ToOwned unnecessarily gets called twice
-// but I can't think of another way to do it
+// this is ugly because souvlaki turns a MediaMetadata into its own form of OwnedMetadata
+// this means that ToOwned gets called twice, but I can't think of another way to do it
 impl<'a> From<MediaMetadata<'a>> for OwnedMetadata {
     fn from(MediaMetadata { title, album, artist, cover_url, duration }: MediaMetadata) -> Self {
         Self {

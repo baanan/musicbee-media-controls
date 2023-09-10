@@ -124,7 +124,7 @@ async fn create(config: Config, tray: bool) -> Result<()> {
     }
 
     // start watching the filesystem
-    let watcher = filesystem::watch(messages.sender(), config.clone())
+    let watcher = filesystem::watch(messages.sender(), &config)
         .context("failed to start to watch the filesystem")?;
 
     // set up the system tray

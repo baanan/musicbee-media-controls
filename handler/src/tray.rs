@@ -4,13 +4,13 @@ use tray_item::{TrayItem, IconSource};
 
 use crate::{config::Config, messages::MessageSender, logger};
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 
 // TODO: fancier tray (attach toggle, metadata)
 
 pub fn start(message_sender: MessageSender, config: Arc<Config>) -> Result<()> {
     // initialize gtk
-    gtk::init().unwrap();
+    gtk::init().context("failed to initialize gtk")?;
 
     // create tray
     self::create(message_sender, config)?;

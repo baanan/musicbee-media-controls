@@ -53,6 +53,7 @@ pub enum Commands {
 }
 
 #[derive(Args)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RunConfig {
     /// Force the daemon to start without checking if one already exists
     #[arg(short, long)]

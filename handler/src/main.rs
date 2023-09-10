@@ -2,6 +2,7 @@
 // #![allow(unused_variables)]
 // #![allow(unused_imports)]
 #![allow(clippy::wildcard_imports)]
+#![allow(clippy::semicolon_if_nothing_returned)] // useful if the function changes
 
 mod tray;
 mod filesystem;
@@ -54,7 +55,7 @@ fn main() -> Result<()> {
 
 // async is run later in daemon::run because daemonize breaks async
 fn run_async(function: impl Future<Output = Result<()>>) -> Result<()> {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().context("failed to initialize async runtime")?;
     let res = rt.block_on(function);
     rt.shutdown_timeout(Duration::from_secs(1));
     res

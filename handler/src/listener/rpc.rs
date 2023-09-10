@@ -8,6 +8,7 @@ use discord_rich_presence::{DiscordIpcClient, DiscordIpc, activity::{Activity, A
 use futures::future::join_all;
 use log::trace;
 use reqwest::{multipart::{Form, Part}, Client, Body};
+use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use souvlaki::MediaMetadata;
 use tokio::fs::File;
@@ -32,11 +33,10 @@ impl Listener for Rpc {
             Command::Metadata(metadata) => 
                 self.metadata(&(*metadata).as_ref()).await.context("failed to set metadata")?, 
             Command::Attached(true) if !self.attached =>
-                self.attach().await.context("failed to attach")?,
+                self.attach().context("failed to attach")?,
             Command::Attached(false) if self.attached => 
                 self.detach().await.context("failed to detach")?,
-            // ignore attaches when already attached and detaches when already detached
-            Command::Attached(_) => (),
+            // NOTE: ignores attaches when already attached and detaches when already detached
             _ => (),
         }
         Ok(())
@@ -53,7 +53,7 @@ impl Rpc {
         let client = DiscordIpcClient::new("942300665726767144")
             .expect("failed to create discord ipc client");
 
-        let cover_cache = CoverCache::with(&Service::Imgur);
+        let cover_cache = CoverCache::with(&config.rpc.service);
 
         Self { client, config, cover_cache, attached: false }
     }
@@ -82,7 +82,7 @@ impl Rpc {
         Ok(())
     }
 
-    async fn attach(&mut self) -> Result<()> {
+    fn attach(&mut self) -> Result<()> {
         if !self.attached {
             self.client.connect()
                 .map_err(|err| anyhow!("failed to connect rpc: {err}"))?;
@@ -171,7 +171,7 @@ impl CoverCache {
         let images = self.cached.drain();
         if self.uploader.needs_deleting() {
             let delete_all = images.map(|(_, file)| file) // take all images
-                .map(|image| image.delete()); // create futures to delete them
+                .map(UploadedFile::delete); // create futures to delete them
             join_all(delete_all).await.into_iter() // join them all
                 .collect::<Result<()>>()?; // and fold the results into a single one
         }
@@ -192,6 +192,7 @@ pub async fn form_file(path: &Path) -> Result<Part> {
     Ok(part)
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Service {
     Litterbox,
     Imgur,
