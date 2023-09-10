@@ -51,6 +51,8 @@ Generic configuration can be found with `musicbee_media_controls config-file --o
     // discord rich presence
     rpc: (
         enabled: false,
+        // image service for cover uploads, could be Imgur or Litterbox
+        service: Imgur,
     ),
     // a mapping between the music folder of the wine prefix and your own music folder
     music_file_mapper: (
