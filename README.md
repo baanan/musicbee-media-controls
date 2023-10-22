@@ -89,5 +89,5 @@ Generic configuration can be found with `musicbee_media_controls config-file --o
   - [ ] rebrand as generic for discord rpc
 - [ ] discord rpc
   - [x] start
-  - [ ] async cover uploading (big performance issue currently)
+  - [x] async cover uploading (big performance issue currently)
   - [ ] custom config
